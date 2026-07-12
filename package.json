@@ -1,6 +1,6 @@
 {
   "name": "streambridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "A privacy-conscious Chrome and Firefox extension for finding verified stream URLs.",
@@ -32,6 +32,7 @@
     "stress:public": "npm run fixtures && npm run build && node scripts/stress-streams.mjs --suite public",
     "stress:live": "npm run build && node scripts/stress-streams.mjs --suite missav && node scripts/stress-streams.mjs --suite supjav",
     "stress:android": "npm run fixtures && npm run build && node scripts/stress-android.mjs",
+    "android:bridge": "node scripts/build-android-bridge.mjs",
     "stress": "npm run stress:control && npm run stress:public && npm run stress:live",
     "verify": "npm run test && npm run typecheck && npm run lint && npm run lint:webext && npm run test:e2e && npm run assets:check && npm run release:check && npm run package && npm run test:package"
   },

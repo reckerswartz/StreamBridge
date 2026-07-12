@@ -1,4 +1,5 @@
 import browser from "webextension-polyfill";
+import { createVlcBridgeUrl, createVlcPlaylist, vlcPlaylistFilename } from "../core/vlc";
 import { MESSAGE, type StreamCandidate, type StreamVariant } from "../shared/types";
 
 declare global {
@@ -32,6 +33,9 @@ if (!window.__streamBridgeOverlay) {
     .card { padding: 12px; margin-bottom: 9px; border: 1px solid #ffffff1c; border-radius: 13px; background: #152040; }
     .title { font-weight: 700; overflow-wrap: anywhere; }
     .meta { margin: 5px 0 9px; color: #b9c5ee; font-size: 12px; }
+    .access { display: inline-block; margin: 0 0 8px; padding: 3px 7px; border-radius: 999px; background: #214b3d; color: #baf7dc; font-size: 11px; font-weight: 800; letter-spacing: .03em; }
+    .access.context { background: #59431d; color: #ffe0a3; }
+    .warning { margin: 0 0 9px; padding: 8px 9px; border-radius: 9px; background: #ffb02018; color: #ffe0a3; font-size: 12px; }
     .variant { margin-top: 9px; padding-top: 9px; border-top: 1px solid #ffffff18; }
     .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
     .actions button { border: 1px solid #7185c9; border-radius: 9px; padding: 7px 10px; background: #263867; color: white; cursor: pointer; font-weight: 600; }
@@ -44,10 +48,10 @@ if (!window.__streamBridgeOverlay) {
   root.id = "root";
   const panelElement = document.createElement("section");
   panelElement.id = "panel";
-  panelElement.setAttribute("aria-label", "Verified streams");
+  panelElement.setAttribute("aria-label", "Streams");
   const headerElement = document.createElement("header");
   const heading = document.createElement("h2");
-  heading.textContent = "Verified streams";
+  heading.textContent = "Streams";
   const closeElement = document.createElement("button");
   closeElement.id = "close";
   closeElement.setAttribute("aria-label", "Close");
@@ -61,7 +65,7 @@ if (!window.__streamBridgeOverlay) {
   panelElement.append(headerElement, listElement, statusElement);
   const toggleElement = document.createElement("button");
   toggleElement.id = "toggle";
-  toggleElement.setAttribute("aria-label", "Open verified streams");
+  toggleElement.setAttribute("aria-label", "Open streams");
   const iconElement = document.createElement("img");
   iconElement.alt = "";
   iconElement.src = browser.runtime.getURL("icons/streambridge-32.png");
@@ -89,28 +93,105 @@ if (!window.__streamBridgeOverlay) {
     status.textContent = value;
   }
 
-  async function copy(url: string): Promise<void> {
+  async function copy(url: string, siteContext = false): Promise<void> {
     await navigator.clipboard.writeText(url);
-    setStatus("Exact stream URL copied.");
+    setStatus(siteContext ? "URL copied. It may require the source website to play." : "Exact portable stream URL copied.");
   }
 
-  async function share(url: string): Promise<void> {
+  async function share(url: string, siteContext = false): Promise<void> {
     if (typeof navigator.share === "function") {
-      await navigator.share({ title: "Open verified stream", url });
-      setStatus("Stream shared.");
+      await navigator.share({ title: "Open stream", url });
+      setStatus(siteContext ? "Stream shared with a warning: external playback may require the source site." : "Stream shared.");
       return;
     }
-    await copy(url);
+    await copy(url, siteContext);
     setStatus("Sharing is unavailable; URL copied instead.");
   }
 
-  function actions(url: string): HTMLElement {
+  async function resumeSitePlayer(): Promise<void> {
+    const media = Array.from(document.querySelectorAll<HTMLMediaElement>("video,audio"))
+      .filter((item) => item.currentSrc || item.src)
+      .sort((left, right) => {
+        const score = (item: HTMLMediaElement) => {
+          const rect = item.getBoundingClientRect();
+          return (item.paused ? 0 : 1_000_000_000) + Math.max(0, rect.width) * Math.max(0, rect.height);
+        };
+        return score(right) - score(left);
+      })[0];
+    if (!media) throw new Error("The website player is no longer available. Start playback again.");
+    media.scrollIntoView({ behavior: "smooth", block: "center" });
+    await media.play();
+    setStatus("The source website player is active.");
+  }
+
+  function downloadPlaylist(playlist: string, filename: string): void {
+    const objectUrl = URL.createObjectURL(new Blob([playlist], { type: "application/x-mpegURL" }));
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.hidden = true;
+    document.documentElement.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    setStatus("VLC playlist downloaded. On Android, open it with StreamBridge VLC Bridge.");
+  }
+
+  async function shareVlcPlaylist(url: string, label: string): Promise<void> {
+    const playlist = createVlcPlaylist({ streamUrl: url, referrerUrl: location.href, userAgent: navigator.userAgent, title: label });
+    const filename = vlcPlaylistFilename(label);
+    if (/Android/i.test(navigator.userAgent)) {
+      setStatus("Opening StreamBridge VLC Bridge. Install its APK if Firefox reports no handler.");
+      location.assign(createVlcBridgeUrl(playlist));
+      return;
+    }
+    if (typeof navigator.share === "function") {
+      for (const type of ["application/x-mpegURL", "text/plain"]) {
+        const file = new File([playlist], filename, { type });
+        if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) continue;
+        try {
+          setStatus("Choose StreamBridge VLC Bridge from the Android share sheet.");
+          await navigator.share({ title: "Open StreamBridge stream through VLC Bridge", files: [file] });
+          setStatus("Playlist sent. VLC Bridge will open VLC automatically.");
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+        }
+      }
+      try {
+        setStatus("Choose StreamBridge VLC Bridge from the Android share sheet.");
+        await navigator.share({ title: "Open StreamBridge stream through VLC Bridge", text: playlist });
+        setStatus("Playlist sent. VLC Bridge will open VLC automatically.");
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+      }
+    }
+    downloadPlaylist(playlist, filename);
+  }
+
+  async function openInVlc(url: string, label: string, siteContext: boolean): Promise<void> {
+    if (siteContext) return shareVlcPlaylist(url, label);
+    if (typeof navigator.share === "function") {
+      setStatus("Choose VLC from the Android share sheet.");
+      await navigator.share({ title: "Open StreamBridge stream in VLC", url });
+      setStatus("Stream sent to the selected app.");
+      return;
+    }
+    await copy(url, false);
+    setStatus("Sharing is unavailable; URL copied for VLC instead.");
+  }
+
+  function actions(url: string, siteContext: boolean, label: string): HTMLElement {
     const container = document.createElement("div");
     container.className = "actions";
     const definitions: Array<[string, string, () => Promise<unknown>]> = [
-      ["Play in Browser", "primary", () => browser.runtime.sendMessage({ type: MESSAGE.OPEN_PLAYER, url })],
-      ["Copy URL", "", () => copy(url)],
-      ["Share", "", () => share(url)]
+      siteContext
+        ? ["Resume site player", "primary", () => resumeSitePlayer()]
+        : ["Play in Browser", "primary", () => browser.runtime.sendMessage({ type: MESSAGE.OPEN_PLAYER, url })],
+      ["Open in VLC", "", () => openInVlc(url, label, siteContext)],
+      ["Copy URL", "", () => copy(url, siteContext)],
+      ["Share", "", () => share(url, siteContext)]
     ];
     for (const [label, className, handler] of definitions) {
       const button = document.createElement("button");
@@ -122,7 +203,7 @@ if (!window.__streamBridgeOverlay) {
     return container;
   }
 
-  function renderVariant(variant: StreamVariant): HTMLElement {
+  function renderVariant(variant: StreamVariant, siteContext: boolean): HTMLElement {
     const row = document.createElement("div");
     row.className = "variant";
     const resolution = variant.width && variant.height ? `${variant.width}×${variant.height}` : variant.quality || "Variant";
@@ -133,7 +214,7 @@ if (!window.__streamBridgeOverlay) {
     const variantMeta = document.createElement("div");
     variantMeta.className = "meta";
     variantMeta.textContent = [bitrate, variant.estimatedBytes ? `~${bytes(variant.estimatedBytes)}` : ""].filter(Boolean).join(" · ");
-    row.append(variantTitle, variantMeta, actions(variant.url));
+    row.append(variantTitle, variantMeta, actions(variant.url, siteContext, resolution));
     return row;
   }
 
@@ -150,8 +231,19 @@ if (!window.__streamBridgeOverlay) {
       const cardMeta = document.createElement("div");
       cardMeta.className = "meta";
       cardMeta.textContent = meta;
-      card.append(cardTitle, cardMeta, actions(stream.url));
-      for (const variant of stream.variants) card.append(renderVariant(variant));
+      const siteContext = stream.accessMode === "site-context";
+      const access = document.createElement("div");
+      access.className = `access${siteContext ? " context" : ""}`;
+      access.textContent = siteContext ? "Site-context" : "Portable";
+      card.append(cardTitle, cardMeta, access);
+      if (siteContext) {
+        const warning = document.createElement("p");
+        warning.className = "warning";
+        warning.textContent = "This stream needs the source website's request context. A copied or shared URL may fail in VLC or another browser.";
+        card.append(warning);
+      }
+      card.append(actions(stream.url, siteContext, stream.displayUrl));
+      for (const variant of stream.variants) card.append(renderVariant(variant, siteContext));
       list.append(card);
     }
   }

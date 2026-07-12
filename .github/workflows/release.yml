@@ -27,17 +27,45 @@ jobs:
         with:
           firefox-version: latest
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick zip
+      - name: Install Android bridge build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+      - name: Prepare Android bridge signing key
+        env:
+          ANDROID_BRIDGE_KEYSTORE_BASE64: ${{ secrets.ANDROID_BRIDGE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_BRIDGE_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_BRIDGE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/streambridge-vlc-bridge.p12"
+          chmod 600 "$RUNNER_TEMP/streambridge-vlc-bridge.p12"
+          echo "ANDROID_BRIDGE_KEYSTORE=$RUNNER_TEMP/streambridge-vlc-bridge.p12" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - id: version
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: npm run release:check -- --tag="$GITHUB_REF_NAME"
+        env:
+          ANDROID_BRIDGE_RELEASE: "1"
+          ANDROID_BRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_BRIDGE_KEY_ALIAS }}
+          ANDROID_BRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEYSTORE_PASSWORD }}
+          ANDROID_BRIDGE_KEY_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEY_PASSWORD }}
       - run: npm run verify
+        env:
+          ANDROID_BRIDGE_RELEASE: "1"
+          ANDROID_BRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_BRIDGE_KEY_ALIAS }}
+          ANDROID_BRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEYSTORE_PASSWORD }}
+          ANDROID_BRIDGE_KEY_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEY_PASSWORD }}
       - run: npm run release:reproducible
+        env:
+          ANDROID_BRIDGE_RELEASE: "1"
+          ANDROID_BRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_BRIDGE_KEY_ALIAS }}
+          ANDROID_BRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEYSTORE_PASSWORD }}
+          ANDROID_BRIDGE_KEY_PASSWORD: ${{ secrets.ANDROID_BRIDGE_KEY_PASSWORD }}
       - uses: actions/attest@v4
         with:
           subject-path: |
             artifacts/*.zip
+            artifacts/*.apk
             artifacts/*.json
             artifacts/SHA256SUMS
       - uses: actions/upload-artifact@v7

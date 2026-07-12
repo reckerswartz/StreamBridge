@@ -11,3 +11,5 @@ ADB_BIN="$HOME/Android/Sdk/platform-tools/adb" npm run stress:android
 For a signed release, download the XPI in Firefox Android, open Settings > About Firefox, tap the Firefox logo five times, return to Settings, choose Install Extension from File, and select the XPI. Restart Firefox and confirm StreamBridge remains in the Extensions list.
 
 The release gate uses an API-36 emulator, the declared minimum Firefox version, and a pinned current stable Firefox build. It validates installation persistence, responsive controls, playback, session cleanup, memory recovery, and sanitized `adb logcat` output.
+
+For site-context VLC playback, also install the signed `streambridge-*-vlc-bridge.apk` from the same GitHub Release and VLC for Android. Start the website player, open StreamBridge, and tap **Open in VLC**. Firefox should hand the encoded M3U to the bridge, and the bridge should open official VLC without a per-site VLC setting. Use the bridge notification's Stop action after playback.

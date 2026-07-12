@@ -42,6 +42,15 @@ const storeAssetsName = `streambridge-${tag}-store-assets.zip`;
 await zipDirectory(resolve(root, "store/assets"), resolve(artifacts, storeAssetsName), epoch);
 outputs.push({ file: storeAssetsName, browser: "stores", purpose: "Store listing icons, screenshots, and promotional images", signed: false });
 
+if (process.env.ANDROID_BRIDGE_RELEASE === "1") {
+  for (const name of ["ANDROID_BRIDGE_KEYSTORE", "ANDROID_BRIDGE_KEY_ALIAS", "ANDROID_BRIDGE_KEYSTORE_PASSWORD", "ANDROID_BRIDGE_KEY_PASSWORD"]) {
+    if (!process.env[name]) throw new Error(`${name} is required for a signed VLC Bridge release.`);
+  }
+  await import("./build-android-bridge.mjs");
+  const bridgeName = `streambridge-${tag}-vlc-bridge.apk`;
+  outputs.push({ file: bridgeName, browser: "android", purpose: "Optional signed Android loopback bridge for site-context playback in official VLC", signed: true });
+}
+
 const releaseNotes = await changelogEntry(version);
 await writeFile(resolve(artifacts, "RELEASE_NOTES.md"), releaseNotes.body);
 

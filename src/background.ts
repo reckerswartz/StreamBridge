@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill";
 import { classifyResponse, safeDisplayUrl, stableId } from "./core/classifier";
+import { validateInPageContext } from "./core/page-validator";
 import { validateCandidate, validationIsFresh } from "./core/validator";
 import { MESSAGE, type PlayerRequest, type StreamCandidate } from "./shared/types";
 
@@ -114,10 +115,10 @@ async function belongsToTopDocument(details: browser.WebRequest.OnHeadersReceive
   }
 }
 
-async function observedByTopDocument(tabId: number, url: string): Promise<boolean> {
+async function observedByDocument(tabId: number, frameId: number, url: string): Promise<boolean> {
   try {
     const results = await (browser.scripting as any).executeScript({
-      target: { tabId },
+      target: { tabId, frameIds: [frameId] },
       args: [url],
       func: (targetUrl: string) => {
         const resourceMatch = performance.getEntriesByType("resource").some((entry) => entry.name === targetUrl);
@@ -131,8 +132,38 @@ async function observedByTopDocument(tabId: number, url: string): Promise<boolea
   }
 }
 
+async function waitForDocumentObservation(tabId: number, frameId: number, url: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await observedByDocument(tabId, frameId, url)) return true;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+function mayUsePageContext(reason: string): boolean {
+  return /^(?:http-(?:401|403)|not-hls|unknown-media|validation-timeout|failed to fetch|load failed|networkerror)/i.test(reason);
+}
+
+async function validateWithPageContext(candidate: StreamCandidate): Promise<Awaited<ReturnType<typeof validateCandidate>>> {
+  try {
+    const results = await (browser.scripting as any).executeScript({
+      target: { tabId: candidate.tabId, frameIds: [candidate.frameId] },
+      world: "MAIN",
+      args: [candidate.url, candidate.kind],
+      func: validateInPageContext
+    });
+    const result = results.find((item: { result?: unknown }) => item.result)?.result;
+    if (result && typeof result === "object") return result as Awaited<ReturnType<typeof validateCandidate>>;
+    return { status: "rejected", reason: "page-context-no-result", bytesRead: 0 };
+  } catch (error) {
+    return { status: "rejected", reason: error instanceof Error ? error.message.slice(0, 80) : "page-context-error", bytesRead: 0 };
+  }
+}
+
 async function playableStreams(tabId: number): Promise<StreamCandidate[]> {
-  return (await streamsForTab(tabId)).filter((stream) => validationIsFresh(stream));
+  const fresh = (await streamsForTab(tabId)).filter((stream) => validationIsFresh(stream));
+  const variantUrls = new Set(fresh.flatMap((stream) => stream.variants.map((variant) => variant.url)));
+  return fresh.filter((stream) => !variantUrls.has(stream.url));
 }
 
 async function ensureOverlay(tabId: number): Promise<void> {
@@ -180,8 +211,10 @@ async function runValidation(job: ValidationJob, signal: AbortSignal): Promise<v
   if (!current) return;
   let result = await validateCandidate(current, signal);
   if (signal.aborted || job.generation !== generationFor(job.tabId)) return;
-  if (result.status === "playable" && !(await observedByTopDocument(job.tabId, current.url))) {
-    result = { status: "rejected", reason: "not-top-document", bytesRead: result.bytesRead };
+  const observed = await waitForDocumentObservation(job.tabId, current.frameId, current.url);
+  if (!observed) result = { status: "rejected", reason: "not-top-document", bytesRead: result.bytesRead };
+  else if (result.status === "rejected" && mayUsePageContext(result.reason)) {
+    result = await validateWithPageContext(current);
   }
   if (signal.aborted || job.generation !== generationFor(job.tabId)) return;
   if (result.status === "rejected") {
@@ -191,6 +224,7 @@ async function runValidation(job: ValidationJob, signal: AbortSignal): Promise<v
   Object.assign(current, {
     validationStatus: result.status,
     validationReason: result.reason,
+    accessMode: result.accessMode || "portable",
     validatedAt: Date.now(),
     container: result.container,
     variants: result.variants || [],
@@ -224,6 +258,7 @@ async function recordResponse(details: browser.WebRequest.OnHeadersReceivedDetai
   const candidate: StreamCandidate = {
     id: candidateId,
     tabId: details.tabId,
+    frameId: details.frameId,
     url: details.url,
     displayUrl: safeDisplayUrl(details.url),
     kind: classified.kind,
@@ -259,6 +294,7 @@ browser.runtime.onMessage.addListener(async (message: any, sender: browser.Runti
     const requestedUrl = String(message.url || "");
     const parent = sourceStreams.find((stream) => stream.url === requestedUrl || stream.variants.some((variant) => variant.url === requestedUrl));
     if (!parent) throw new Error("The requested stream is not verified or has expired.");
+    if (parent.accessMode === "site-context") throw new Error("This stream must be played from its source website.");
     const request: PlayerRequest = {
       id: crypto.randomUUID(),
       url: requestedUrl,

@@ -10,4 +10,6 @@ No account or credentials are required.
 6. Open either result in the packaged player and confirm playback advances.
 7. Navigate away and confirm the badge/session results clear.
 
+For the deterministic site-context case, visit `http://127.0.0.1:8765/fixture/context`, select **Start referrer-dependent HLS**, and confirm the result is labeled **Site-context** with 360p, 480p, and 720p variants. On Android only, the user-triggered **Open in VLC** action opens the separately packaged GPL bridge through `streambridge-vlc://play`; the encoded M3U is not sent to a server. The optional APK is not part of either browser-store package and is not required to review the extension. Desktop/headless environments retain the local M3U fallback.
+
 Validation requests are bounded and omit cookies, authorization, credentials, and referrers. The repository Playwright test automates the same flow.

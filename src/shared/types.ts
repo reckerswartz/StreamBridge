@@ -1,5 +1,6 @@
 export type StreamKind = "hls" | "file";
 export type ValidationStatus = "checking" | "playable" | "rejected";
+export type StreamAccessMode = "portable" | "site-context";
 
 export interface StreamVariant {
   id: string;
@@ -14,6 +15,7 @@ export interface StreamVariant {
 export interface StreamCandidate {
   id: string;
   tabId: number;
+  frameId: number;
   url: string;
   displayUrl: string;
   kind: StreamKind;
@@ -21,6 +23,7 @@ export interface StreamCandidate {
   firstSeenAt: number;
   validationStatus: ValidationStatus;
   validationReason?: string;
+  accessMode?: StreamAccessMode;
   validatedAt?: number;
   container?: string;
   exactBytes?: number;

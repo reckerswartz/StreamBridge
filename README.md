@@ -1,8 +1,10 @@
 # StreamBridge
 
-StreamBridge is a GPL-licensed Chrome and Firefox extension that detects HLS and direct-media requests after playback starts. It performs a bounded, credential-free portability check before placing a small control at the bottom of the page.
+StreamBridge is a GPL-licensed Chrome and Firefox extension that detects HLS and direct-media requests after playback starts. It performs bounded, credential-free checks and labels results as portable or site-context before placing a small control at the bottom of the page.
 
-Verified streams can be played in an extension-hosted browser player, copied exactly, or passed to the platform Web Share menu. StreamBridge does not launch VLC directly, download media, bypass site protections, replay private headers, or send browsing history to the developer.
+Streams can be played in the browser, copied exactly, or passed to the platform Web Share menu. For site-context streams, StreamBridge generates a temporary M3U containing the source origin as a referrer. Desktop VLC can read that option directly. Official VLC for Android currently drops per-item M3U HTTP options, so the optional GPL StreamBridge VLC Bridge receives the M3U through a user-triggered app link, preserves its headers through a device-local loopback connection, and then opens VLC. No per-site VLC setting is required.
+
+See [VLC handoff](docs/vlc.md) for supported behavior and limitations.
 
 StreamBridge processes browsing activity locally and re-requests a detected URL only from its media origin for validation. It has no analytics or developer-operated server. See the [privacy policy](PRIVACY.md) for the precise disclosure.
 
@@ -67,6 +69,7 @@ Public non-DRM samples and the ignored live-site catalog are report-only:
 npm run stress:public
 npm run stress:live
 npm run stress:android
+npm run android:bridge  # signed debug APK for physical-device testing
 ```
 
 Use `STRESS_TABS`, `STRESS_CYCLES`, `STRESS_CAPTURE_SECONDS`, and `STRESS_BURST_SECONDS` to adjust a local campaign. Reports are sanitized and written beneath `.tmp/stress/`.
@@ -76,7 +79,9 @@ The Android runner uses bounded range requests to stress capture and cleanup wit
 ## Architecture and limits
 
 - Network classification is synchronous and bounded; validation runs with at most two concurrent jobs.
-- Media probes omit credentials and referrers and stop after bounded byte limits.
+- Media probes always omit credentials and stop after bounded byte limits. The first probe also omits referrers; a rejected URL already observed on the active page may receive one bounded page-context retry and is clearly labeled site-context.
+- VLC handoff creates a small local playlist only after a user action. It contains the selected URL, source origin, and browser user agent, but never cookies or authorization headers.
+- The optional Android VLC Bridge binds only to `127.0.0.1`, uses a random 192-bit session token, buffers manifests up to 2 MiB, streams media in 64 KiB chunks, and keeps at most six proxy workers. It has no remote service or analytics.
 - No permanent page content script or mutation observer is installed. The Shadow DOM UI is injected only after verification.
 - Private-browsing requests are ignored and the manifest disables private operation.
 - Version 0.1 considers requests from the top document only, preventing unrelated advertising iframes from being presented as the page's stream.

@@ -1,5 +1,5 @@
 import { parseHlsManifest } from "./hls";
-import type { StreamCandidate } from "../shared/types";
+import type { StreamAccessMode, StreamCandidate } from "../shared/types";
 
 export const MAX_PROBE_BYTES = 4096;
 export const MAX_MANIFEST_BYTES = 512 * 1024;
@@ -13,6 +13,7 @@ export interface ValidationResult {
   container?: string;
   variants?: StreamCandidate["variants"];
   durationSeconds?: number;
+  accessMode?: StreamAccessMode;
   bytesRead: number;
 }
 
@@ -96,7 +97,7 @@ export async function validateCandidate(candidate: StreamCandidate, signal?: Abo
       const container = sniffContainer(bytes);
       if (!container || container === "image") return { status: "rejected", reason: container === "image" ? "image-wrapped" : "unknown-media", bytesRead: bytes.length };
       if (container === "fmp4-fragment") return { status: "rejected", reason: "media-fragment", bytesRead: bytes.length };
-      return { status: "playable", reason: "standard-media", container, bytesRead: bytes.length };
+      return { status: "playable", reason: "standard-media", container, bytesRead: bytes.length, accessMode: "portable" };
     }
 
     const manifestBytes = await probe(candidate.url, MAX_MANIFEST_BYTES, signal);
@@ -119,7 +120,7 @@ export async function validateCandidate(candidate: StreamCandidate, signal?: Abo
       ...variant,
       estimatedBytes: durationSeconds && variant.bandwidth ? Math.round((durationSeconds * variant.bandwidth) / 8) : undefined
     }));
-    return { status: "playable", reason: "portable-hls", container, variants, durationSeconds, bytesRead: manifestBytes.length + mediaBytes.length + segment.length };
+    return { status: "playable", reason: "portable-hls", container, variants, durationSeconds, bytesRead: manifestBytes.length + mediaBytes.length + segment.length, accessMode: "portable" };
   } catch (error) {
     return { status: "rejected", reason: error instanceof Error ? error.message.slice(0, 80) : "validation-error", bytesRead: 0 };
   }

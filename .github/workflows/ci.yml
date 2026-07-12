@@ -8,6 +8,27 @@ permissions:
   contents: read
 
 jobs:
+  android-vlc-bridge:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install Android build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+      - run: npm run android:bridge
+      - uses: actions/upload-artifact@v7
+        with:
+          name: streambridge-vlc-bridge-debug-${{ github.sha }}
+          path: artifacts/*-vlc-bridge-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
   verify:
     runs-on: ubuntu-latest
     steps:

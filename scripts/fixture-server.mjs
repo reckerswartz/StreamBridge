@@ -16,11 +16,98 @@ document.querySelector('#play-webm').onclick=()=>{const v=document.createElement
 document.querySelector('#request-hls').onclick=()=>fetch('/media/master.m3u8?token=fixture-secret').then(r=>r.text());
 </script></body></html>`;
 
+const contextPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge site-context demo</title></head><body>
+<main><h1>Referrer-dependent stream fixture</h1><p>The media origin accepts credential-free requests only when they retain this page context.</p>
+<button id="start-context">Start site-context stream</button><video id="context-video" controls muted playsinline style="display:block;width:640px;max-width:100%;margin-top:20px"></video></main>
+<script>
+document.querySelector('#start-context').onclick=async()=>{
+  const video=document.querySelector('#context-video');
+  if(!video.src)video.src='/media/sample.mp4?fixture=context-player';
+  await video.play().catch(()=>undefined);
+  const response=await fetch('http://localhost:8765/context-media/master.m3u8?token=context-fixture',{credentials:'omit',headers:{Range:'bytes=0-4095'}});
+  if(!response.ok)throw new Error('context stream unavailable');
+  await response.text();
+};
+</script></body></html>`;
+
+const contextMaster = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+360.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=842x480
+480.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
+720.m3u8
+`;
+
+const vlcTarget = "http://127.0.0.1:8765/context-media/master.m3u8?vlc=1";
+const vlcReferrer = "http://127.0.0.1:8765/";
+const vlcWrappers = new Map([
+  ["/vlc-wrapper.m3u", {
+    type: "application/x-mpegURL",
+    body: `#EXTM3U
+#EXTINF:-1,StreamBridge VLC fixture
+#EXTVLCOPT:http-referrer=${vlcReferrer}
+#EXTVLCOPT:http-user-agent=StreamBridge-VLC-Test/1.0
+${vlcTarget}
+`
+  }],
+  ["/vlc-wrapper-options-first.m3u", {
+    type: "application/x-mpegURL",
+    body: `#EXTM3U
+#EXTVLCOPT:http-referrer=${vlcReferrer}
+#EXTVLCOPT:http-user-agent=StreamBridge-VLC-Test/1.0
+#EXTINF:-1,StreamBridge VLC fixture
+${vlcTarget}
+`
+  }],
+  ["/vlc-wrapper.xspf", {
+    type: "application/xspf+xml",
+    body: `<?xml version="1.0" encoding="UTF-8"?>
+<playlist version="1" xmlns="http://xspf.org/ns/0/" xmlns:vlc="http://www.videolan.org/vlc/playlist/ns/0/">
+  <trackList><track><title>StreamBridge VLC fixture</title><location>${vlcTarget.replaceAll("&", "&amp;")}</location>
+    <extension application="http://www.videolan.org/vlc/playlist/0">
+      <vlc:option>http-referrer=${vlcReferrer}</vlc:option>
+      <vlc:option>http-user-agent=StreamBridge-VLC-Test/1.0</vlc:option>
+    </extension>
+  </track></trackList>
+</playlist>
+`
+  }],
+  ["/vlc-wrapper-exthttp.m3u", {
+    type: "application/x-mpegURL",
+    body: `#EXTM3U
+#EXTINF:-1,StreamBridge VLC fixture
+#EXTHTTP:{"Referer":"${vlcReferrer}","User-Agent":"StreamBridge-VLC-Test/1.0"}
+${vlcTarget}
+`
+  }],
+  ["/vlc-wrapper-pipe.m3u", {
+    type: "application/x-mpegURL",
+    body: `#EXTM3U
+#EXTINF:-1,StreamBridge VLC fixture
+${vlcTarget}|Referer=${encodeURIComponent(vlcReferrer)}&User-Agent=${encodeURIComponent("StreamBridge-VLC-Test/1.0")}
+`
+  }]
+]);
+
 const publicSources = [
   ...Array.from({ length: 5 }, (_, index) => ({ kind: "file", url: `https://developer.mozilla.org/shared-assets/videos/flower.mp4?streambridge-stress=${index + 1}` })),
   ...Array.from({ length: 5 }, (_, index) => ({ kind: "file", url: `https://developer.mozilla.org/shared-assets/videos/flower.webm?streambridge-stress=${index + 6}` })),
   ...Array.from({ length: 5 }, (_, index) => ({ kind: "hls", url: `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8?streambridge-stress=${index + 11}` }))
 ];
+const requestDiagnostics = [];
+
+function rememberFixtureRequest(request, path, status) {
+  requestDiagnostics.push({
+    path,
+    status,
+    origin: request.headers.origin || "",
+    referer: request.headers.referer || "",
+    userAgent: request.headers["user-agent"] || ""
+  });
+  if (requestDiagnostics.length > 100) requestDiagnostics.shift();
+}
 
 function stressPage(id, external) {
   const localKind = id <= 5 ? "file" : id <= 10 ? "file" : "hls";
@@ -50,12 +137,83 @@ if(new URL(location.href).searchParams.get('capture')==='1')void capture();
 const server = createServer(async (request, response) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Cache-Control", "no-store");
+  if (request.url?.startsWith("/fixture/context")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(contextPage);
+    return;
+  }
   if (request.url?.startsWith("/fixture")) {
     response.setHeader("Content-Type", "text/html; charset=utf-8");
     response.end(page);
     return;
   }
   const requestUrl = new URL(request.url || "/", "http://127.0.0.1:8765");
+  if (requestUrl.pathname === "/diagnostics/requests") {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify(requestDiagnostics));
+    return;
+  }
+  if (requestUrl.pathname === "/diagnostics/reset") {
+    requestDiagnostics.length = 0;
+    response.statusCode = 204;
+    response.end();
+    return;
+  }
+  const vlcWrapper = vlcWrappers.get(requestUrl.pathname);
+  if (vlcWrapper) {
+    rememberFixtureRequest(request, requestUrl.pathname, 200);
+    response.setHeader("Content-Type", vlcWrapper.type);
+    response.setHeader("Content-Length", Buffer.byteLength(vlcWrapper.body));
+    response.end(vlcWrapper.body);
+    return;
+  }
+  if (requestUrl.pathname.startsWith("/context-media/")) {
+    const allowedOrigin = request.headers.origin === "http://127.0.0.1:8765";
+    const allowedReferrer = request.headers.referer?.startsWith("http://127.0.0.1:8765/");
+    const allowedVlc = !request.headers.origin;
+    response.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:8765");
+    response.setHeader("Access-Control-Allow-Headers", "Range");
+    response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    if (request.method === "OPTIONS") { response.statusCode = 204; response.end(); return; }
+    if (!allowedReferrer || (!allowedOrigin && !allowedVlc)) { rememberFixtureRequest(request, requestUrl.pathname, 403); response.statusCode = 403; response.end("site context required"); return; }
+    if (requestUrl.pathname === "/context-media/master.m3u8") {
+      rememberFixtureRequest(request, requestUrl.pathname, request.headers.range ? 206 : 200);
+      response.statusCode = request.headers.range ? 206 : 200;
+      response.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      response.setHeader("Content-Length", Buffer.byteLength(contextMaster));
+      response.end(contextMaster);
+      return;
+    }
+    if (/^\/context-media\/(?:360|480|720)\.m3u8$/.test(requestUrl.pathname)) {
+      rememberFixtureRequest(request, requestUrl.pathname, request.headers.range ? 206 : 200);
+      let manifest = await readFile(resolve(fixtures, "media.m3u8"), "utf8");
+      manifest = manifest.replace(/segment-(\d+)\.ts/g, "segment-$1.jpeg");
+      response.statusCode = request.headers.range ? 206 : 200;
+      response.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      response.setHeader("Content-Length", Buffer.byteLength(manifest));
+      response.end(manifest);
+      return;
+    }
+    const segmentMatch = requestUrl.pathname.match(/^\/context-media\/segment-(\d+)\.jpeg$/);
+    if (segmentMatch) {
+      const file = resolve(fixtures, `segment-${segmentMatch[1]}.ts`);
+      const info = await stat(file);
+      const range = request.headers.range?.match(/bytes=(\d+)-(\d*)/);
+      const start = range ? Number(range[1]) : 0;
+      const end = range && range[2] ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
+      if (range) {
+        response.statusCode = 206;
+        response.setHeader("Content-Range", `bytes ${start}-${end}/${info.size}`);
+      }
+      rememberFixtureRequest(request, requestUrl.pathname, range ? 206 : 200);
+      response.setHeader("Accept-Ranges", "bytes");
+      response.setHeader("Content-Length", end - start + 1);
+      response.setHeader("Content-Type", "image/jpeg");
+      createReadStream(file, { start, end }).pipe(response);
+      return;
+    }
+    response.statusCode = 404; response.end("not found"); return;
+  }
   const stressMatch = requestUrl.pathname.match(/^\/stress\/(control|public)\/(\d+)$/);
   if (stressMatch) {
     const id = Number(stressMatch[2]);

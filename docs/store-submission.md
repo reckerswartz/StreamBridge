@@ -2,7 +2,9 @@
 
 ## Single purpose
 
-StreamBridge finds media requests made by the active top-level page, verifies whether a URL is reusable without private credentials, and lets the user play, copy, or share the verified URL.
+StreamBridge finds media requests made by the active top-level page and verifies them without private credentials. Portable URLs can use the built-in player; URLs that retain the source page's normal Origin or Referer are labeled site-context before copy or share actions are offered.
+
+The user-triggered Open in VLC action creates a small local M3U wrapper containing the selected URL, source origin, and browser user agent. On Android it is URL-safe encoded into the optional bridge's explicit custom-scheme link; on other platforms it uses share/download behavior. This requires no new extension permission. The GPL Android VLC Bridge is a separate application and is not bundled into either browser-store archive; its loopback behavior is disclosed in the privacy policy and VLC documentation.
 
 ## Review disclosures
 
