@@ -38,6 +38,26 @@ STREAMBRIDGE_LIVE_SITES=1 HEADED=1 npm run test:sites
 
 Reports omit query strings, cookies, and authorization data.
 
+## Stress and memory testing
+
+The deterministic memory gate opens 15 extension-enabled tabs for three cycles, measures the extension worker heap separately from Chromium process memory, runs a 60-second playback burst, and verifies cleanup:
+
+```bash
+npm run stress:control
+```
+
+Public non-DRM samples and the ignored live-site catalog are report-only:
+
+```bash
+npm run stress:public
+npm run stress:live
+npm run stress:android
+```
+
+Use `STRESS_TABS`, `STRESS_CYCLES`, `STRESS_CAPTURE_SECONDS`, and `STRESS_BURST_SECONDS` to adjust a local campaign. Reports are sanitized and written beneath `.tmp/stress/`.
+
+The Android runner uses bounded range requests to stress capture and cleanup without decoding 15 videos concurrently. Desktop Chromium owns the simultaneous-playback burst; Firefox Android suspends background media, and the project AVD has a known GPU decoder limitation.
+
 ## Architecture and limits
 
 - Network classification is synchronous and bounded; validation runs with at most two concurrent jobs.

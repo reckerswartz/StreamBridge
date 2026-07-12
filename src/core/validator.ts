@@ -69,38 +69,48 @@ async function readBounded(response: Response, maximum: number): Promise<Uint8Ar
   return output;
 }
 
-async function probe(url: string, maximum: number): Promise<Uint8Array> {
-  const response = await fetch(url, {
-    credentials: "omit",
-    referrerPolicy: "no-referrer",
-    headers: { Range: `bytes=0-${maximum - 1}` },
-    signal: AbortSignal.timeout(8000)
-  });
-  return readBounded(response, maximum);
+async function probe(url: string, maximum: number, signal?: AbortSignal): Promise<Uint8Array> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("validation-timeout")), 8000);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const response = await fetch(url, {
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      headers: { Range: `bytes=0-${maximum - 1}` },
+      signal: controller.signal
+    });
+    return await readBounded(response, maximum);
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
-export async function validateCandidate(candidate: StreamCandidate): Promise<ValidationResult> {
+export async function validateCandidate(candidate: StreamCandidate, signal?: AbortSignal): Promise<ValidationResult> {
   try {
     if (candidate.kind === "file") {
-      const bytes = await probe(candidate.url, MAX_PROBE_BYTES);
+      const bytes = await probe(candidate.url, MAX_PROBE_BYTES, signal);
       const container = sniffContainer(bytes);
       if (!container || container === "image") return { status: "rejected", reason: container === "image" ? "image-wrapped" : "unknown-media", bytesRead: bytes.length };
       if (container === "fmp4-fragment") return { status: "rejected", reason: "media-fragment", bytesRead: bytes.length };
       return { status: "playable", reason: "standard-media", container, bytesRead: bytes.length };
     }
 
-    const manifestBytes = await probe(candidate.url, MAX_MANIFEST_BYTES);
+    const manifestBytes = await probe(candidate.url, MAX_MANIFEST_BYTES, signal);
     const manifestText = new TextDecoder().decode(manifestBytes);
     const manifest = parseHlsManifest(manifestText, candidate.url);
     const mediaUrl = manifest.type === "master" ? manifest.variants[0]?.url : candidate.url;
     if (!mediaUrl) return { status: "rejected", reason: "empty-master", bytesRead: manifestBytes.length };
-    const mediaBytes = manifest.type === "master" ? await probe(mediaUrl, MAX_MANIFEST_BYTES) : manifestBytes;
+    const mediaBytes = manifest.type === "master" ? await probe(mediaUrl, MAX_MANIFEST_BYTES, signal) : manifestBytes;
     const media = parseHlsManifest(new TextDecoder().decode(mediaBytes), mediaUrl);
     if (!media.firstSegmentUrl) return { status: "rejected", reason: "no-media-segment", bytesRead: manifestBytes.length + mediaBytes.length };
     if (media.endList && (media.durationSeconds || 0) < MIN_COMPLETE_HLS_SECONDS) {
       return { status: "rejected", reason: "short-complete-hls", bytesRead: manifestBytes.length + mediaBytes.length };
     }
-    const segment = await probe(media.firstSegmentUrl, MAX_PROBE_BYTES);
+    const segment = await probe(media.firstSegmentUrl, MAX_PROBE_BYTES, signal);
     const sniffedContainer = sniffContainer(segment);
     if (!sniffedContainer || sniffedContainer === "image") return { status: "rejected", reason: sniffedContainer === "image" ? "image-wrapped" : "unknown-media", bytesRead: manifestBytes.length + mediaBytes.length + segment.length };
     const container = sniffedContainer === "fmp4-fragment" ? "mp4" : sniffedContainer;

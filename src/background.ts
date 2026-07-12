@@ -4,10 +4,45 @@ import { validateCandidate, validationIsFresh } from "./core/validator";
 import { MESSAGE, type PlayerRequest, type StreamCandidate } from "./shared/types";
 
 const MAX_STREAMS_PER_TAB = 32;
+const MAX_PENDING_PER_TAB = 4;
+const MAX_PENDING_GLOBAL = 64;
+const MAX_SEEN_PER_TAB = 64;
 const tabStreams = new Map<number, StreamCandidate[]>();
-const validationQueue: Array<() => Promise<void>> = [];
+interface ValidationJob { tabId: number; candidateId: string; generation: number }
+const validationQueue: ValidationJob[] = [];
+const pendingValidations = new Set<string>();
+const activeControllers = new Map<string, AbortController>();
+const seenByTab = new Map<number, Map<string, number>>();
+const tabGeneration = new Map<number, number>();
 const injectedTabs = new Set<number>();
 let activeValidations = 0;
+
+function validationKey(tabId: number, candidateId: string): string {
+  return `${tabId}:${candidateId}`;
+}
+
+function generationFor(tabId: number): number {
+  return tabGeneration.get(tabId) || 0;
+}
+
+function releaseGenerationIfIdle(tabId: number): void {
+  const queued = validationQueue.some((job) => job.tabId === tabId);
+  const active = [...activeControllers.keys()].some((key) => key.startsWith(`${tabId}:`));
+  if (!queued && !active && !tabStreams.has(tabId)) tabGeneration.delete(tabId);
+}
+
+function rememberCandidate(tabId: number, candidateId: string): void {
+  const seen = seenByTab.get(tabId) || new Map<string, number>();
+  seen.delete(candidateId);
+  seen.set(candidateId, Date.now());
+  while (seen.size > MAX_SEEN_PER_TAB) seen.delete(seen.keys().next().value!);
+  seenByTab.set(tabId, seen);
+}
+
+function wasRecentlySeen(tabId: number, candidateId: string): boolean {
+  const seenAt = seenByTab.get(tabId)?.get(candidateId);
+  return Boolean(seenAt && Date.now() - seenAt <= 5 * 60 * 1000);
+}
 
 function tabStorageKey(tabId: number): string {
   return `streams:${tabId}`;
@@ -25,12 +60,29 @@ async function streamsForTab(tabId: number): Promise<StreamCandidate[]> {
 
 async function persistStreams(tabId: number, streams: StreamCandidate[]): Promise<void> {
   tabStreams.set(tabId, streams);
+  if (!streams.length) {
+    await browser.storage.session.remove(tabStorageKey(tabId));
+    return;
+  }
   await browser.storage.session.set({ [tabStorageKey(tabId)]: streams.slice(0, MAX_STREAMS_PER_TAB) });
 }
 
 async function clearStreams(tabId: number): Promise<void> {
+  tabGeneration.set(tabId, generationFor(tabId) + 1);
   tabStreams.delete(tabId);
+  seenByTab.delete(tabId);
+  for (let index = validationQueue.length - 1; index >= 0; index -= 1) {
+    const job = validationQueue[index];
+    if (job.tabId !== tabId) continue;
+    pendingValidations.delete(validationKey(job.tabId, job.candidateId));
+    validationQueue.splice(index, 1);
+  }
+  for (const [key, controller] of activeControllers) {
+    if (!key.startsWith(`${tabId}:`)) continue;
+    controller.abort(new Error("tab-closed"));
+  }
   await browser.storage.session.remove(tabStorageKey(tabId));
+  releaseGenerationIfIdle(tabId);
 }
 
 function header(headers: browser.WebRequest.HttpHeaders | undefined, name: string): string {
@@ -107,35 +159,57 @@ function runQueue(): void {
   while (activeValidations < 2 && validationQueue.length) {
     const job = validationQueue.shift();
     if (!job) return;
+    const key = validationKey(job.tabId, job.candidateId);
+    const controller = new AbortController();
+    activeControllers.set(key, controller);
     activeValidations += 1;
-    void job().finally(() => {
+    void runValidation(job, controller.signal).finally(() => {
+      pendingValidations.delete(key);
+      activeControllers.delete(key);
+      releaseGenerationIfIdle(job.tabId);
       activeValidations -= 1;
       runQueue();
     });
   }
 }
 
-function enqueueValidation(tabId: number, candidate: StreamCandidate): void {
-  validationQueue.push(async () => {
-    const streams = await streamsForTab(tabId);
-    const current = streams.find((stream) => stream.id === candidate.id);
-    if (!current) return;
-    let result = await validateCandidate(current);
-    if (result.status === "playable" && !(await observedByTopDocument(tabId, current.url))) {
-      result = { status: "rejected", reason: "not-top-document", bytesRead: result.bytesRead };
-    }
-    Object.assign(current, {
-      validationStatus: result.status,
-      validationReason: result.reason,
-      validatedAt: Date.now(),
-      container: result.container,
-      variants: result.variants || [],
-      durationSeconds: result.durationSeconds
-    });
-    await persistStreams(tabId, streams);
-    if (result.status === "playable") await notifyOverlay(tabId);
+async function runValidation(job: ValidationJob, signal: AbortSignal): Promise<void> {
+  if (job.generation !== generationFor(job.tabId)) return;
+  const streams = await streamsForTab(job.tabId);
+  const current = streams.find((stream) => stream.id === job.candidateId);
+  if (!current) return;
+  let result = await validateCandidate(current, signal);
+  if (signal.aborted || job.generation !== generationFor(job.tabId)) return;
+  if (result.status === "playable" && !(await observedByTopDocument(job.tabId, current.url))) {
+    result = { status: "rejected", reason: "not-top-document", bytesRead: result.bytesRead };
+  }
+  if (signal.aborted || job.generation !== generationFor(job.tabId)) return;
+  if (result.status === "rejected") {
+    await persistStreams(job.tabId, streams.filter((stream) => stream.id !== job.candidateId));
+    return;
+  }
+  Object.assign(current, {
+    validationStatus: result.status,
+    validationReason: result.reason,
+    validatedAt: Date.now(),
+    container: result.container,
+    variants: result.variants || [],
+    durationSeconds: result.durationSeconds
   });
+  await persistStreams(job.tabId, streams);
+  await notifyOverlay(job.tabId);
+}
+
+function enqueueValidation(tabId: number, candidate: StreamCandidate): boolean {
+  const key = validationKey(tabId, candidate.id);
+  if (pendingValidations.has(key)) return false;
+  const perTab = validationQueue.filter((job) => job.tabId === tabId).length
+    + [...activeControllers.keys()].filter((activeKey) => activeKey.startsWith(`${tabId}:`)).length;
+  if (perTab >= MAX_PENDING_PER_TAB || pendingValidations.size >= MAX_PENDING_GLOBAL) return false;
+  pendingValidations.add(key);
+  validationQueue.push({ tabId, candidateId: candidate.id, generation: generationFor(tabId) });
   runQueue();
+  return true;
 }
 
 async function recordResponse(details: browser.WebRequest.OnHeadersReceivedDetailsType): Promise<void> {
@@ -145,9 +219,10 @@ async function recordResponse(details: browser.WebRequest.OnHeadersReceivedDetai
   if (!classified) return;
   if (!(await belongsToTopDocument(details))) return;
   const streams = await streamsForTab(details.tabId);
-  if (streams.some((stream) => stream.url === details.url)) return;
+  const candidateId = stableId(details.url);
+  if (streams.some((stream) => stream.url === details.url) || wasRecentlySeen(details.tabId, candidateId)) return;
   const candidate: StreamCandidate = {
-    id: stableId(details.url),
+    id: candidateId,
     tabId: details.tabId,
     url: details.url,
     displayUrl: safeDisplayUrl(details.url),
@@ -160,8 +235,13 @@ async function recordResponse(details: browser.WebRequest.OnHeadersReceivedDetai
   };
   streams.unshift(candidate);
   if (streams.length > MAX_STREAMS_PER_TAB) streams.length = MAX_STREAMS_PER_TAB;
+  if (!enqueueValidation(details.tabId, candidate)) {
+    const index = streams.findIndex((stream) => stream.id === candidate.id);
+    if (index >= 0) streams.splice(index, 1);
+    return;
+  }
+  rememberCandidate(details.tabId, candidate.id);
   await persistStreams(details.tabId, streams);
-  enqueueValidation(details.tabId, candidate);
 }
 
 browser.webRequest.onHeadersReceived.addListener((details) => { void recordResponse(details); }, { urls: ["<all_urls>"] }, ["responseHeaders"]);

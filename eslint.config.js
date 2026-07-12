@@ -10,6 +10,7 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: {
         browser: "readonly",
+        Buffer: "readonly",
         chrome: "readonly",
         document: "readonly",
         window: "readonly",
@@ -22,6 +23,8 @@ export default tseslint.config(
         setTimeout: "readonly",
         clearTimeout: "readonly",
         TextDecoder: "readonly",
+        TextEncoder: "readonly",
+        WebSocket: "readonly",
         ReadableStream: "readonly",
         HTMLVideoElement: "readonly",
         console: "readonly",

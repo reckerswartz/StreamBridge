@@ -1,0 +1,14 @@
+{
+  "tabs": 15,
+  "cycles": 3,
+  "captureSeconds": 8,
+  "burstSeconds": 60,
+  "controlGates": {
+    "workerHeapMiB": 12,
+    "postCloseHeapDeltaMiB": 2,
+    "cycleHeapGrowthMiB": 1,
+    "sessionStorageMiB": 2,
+    "browserPssRecoveryMiB": 100,
+    "browserPssRecoveryPercent": 20
+  }
+}
