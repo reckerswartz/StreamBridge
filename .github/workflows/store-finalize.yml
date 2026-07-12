@@ -44,8 +44,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          conclusion=$(gh run list --workflow mobile.yml --commit "$GITHUB_SHA" --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion')
-          test "$conclusion" = success || { echo "Firefox Android workflow has not passed for $GITHUB_SHA (status: ${conclusion:-missing})."; exit 1; }
+          release_sha=$(git rev-parse HEAD)
+          conclusion=$(gh run list --workflow mobile.yml --commit "$release_sha" --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion')
+          test "$conclusion" = success || { echo "Firefox Android workflow has not passed for $release_sha (status: ${conclusion:-missing})."; exit 1; }
       - name: Attach XPI and publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -15,6 +15,7 @@ All notable StreamBridge changes are documented here. Releases follow semantic v
 - Deterministic Playwright coverage plus 15-tab desktop and Firefox Android memory diagnostics.
 - Reproducible release packages, checksums, SPDX SBOM, reviewer source, store assets, and GitHub artifact provenance.
 - Protected Mozilla Add-ons and Chrome Web Store submission workflows.
+- Firefox Android smoke coverage at the declared minimum and a pinned stable browser version, with bounded emulator boot diagnostics.
 
 ### Changed
 

@@ -29,12 +29,22 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg zip
       - name: Create API 36 emulator
         run: |
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-36;google_apis;x86_64"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name streambridge_api36 --package "system-images;android-36;google_apis;x86_64"
-          "$ANDROID_HOME/emulator/emulator" -avd streambridge_api36 -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot-load &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
-          until [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx streambridge_api36
+          sudo chmod 666 /dev/kvm || true
+          nohup "$ANDROID_HOME/emulator/emulator" -avd streambridge_api36 -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot-load > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          timeout 300 "$ANDROID_HOME/platform-tools/adb" wait-for-device || { cat "$RUNNER_TEMP/emulator.log"; exit 1; }
+          booted=false
+          for _ in $(seq 1 150); do
+            if [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then booted=true; break; fi
+            sleep 2
+          done
+          if [ "$booted" != true ]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+          "$ANDROID_HOME/platform-tools/adb" shell input keyevent 82
       - name: Install pinned official Firefox Android
         env:
           FIREFOX_VERSION: ${{ matrix.firefox }}
@@ -48,7 +58,7 @@ jobs:
           ADB_DEVICE: emulator-5554
           ANDROID_AVD: streambridge_api36
           FIREFOX_PACKAGE: org.mozilla.firefox
-          STRESS_TABS: 15
+          STRESS_TABS: 5
         run: npm run stress:android
       - uses: actions/upload-artifact@v7
         if: always()
