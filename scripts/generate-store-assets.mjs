@@ -14,8 +14,26 @@ const generatedStore = resolve(temporary, "store");
 await mkdir(generatedIcons, { recursive: true });
 await mkdir(generatedStore, { recursive: true });
 
+async function imageMagick(args) {
+  try {
+    return await exec("magick", args);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return exec("convert", args);
+  }
+}
+
+async function identify(image) {
+  try {
+    return await exec("magick", ["identify", "-format", "%wx%h", image]);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return exec("identify", ["-format", "%wx%h", image]);
+  }
+}
+
 async function rasterize(input, size, output) {
-  await exec("magick", ["-background", "none", input, "-resize", `${size}x${size}`, "-strip", "-define", "png:exclude-chunk=time,date", `PNG32:${output}`]);
+  await imageMagick(["-background", "none", input, "-resize", `${size}x${size}`, "-strip", "-define", "png:exclude-chunk=time,date", `PNG32:${output}`]);
 }
 
 for (const size of [16, 32, 48, 64, 96, 128]) {
@@ -30,15 +48,15 @@ await writeFile(promoSvg, `<svg xmlns="http://www.w3.org/2000/svg" width="440" h
   <g transform="translate(32 76)"><rect width="128" height="128" rx="30" fill="url(#g)"/><path d="M53 37v54l44-27-44-27Z" fill="#fff"/><path d="M32 43c-13 12-13 30 0 42M20 31C0 50 0 78 20 97" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".9"/></g>
   <text x="184" y="125" fill="#fff" font-family="DejaVu Sans, sans-serif" font-size="36" font-weight="700">StreamBridge</text><text x="186" y="160" fill="#d9d2ff" font-family="DejaVu Sans, sans-serif" font-size="17">Find, verify, and play media URLs</text><text x="186" y="188" fill="#a99de4" font-family="DejaVu Sans, sans-serif" font-size="14">Private by design · No analytics</text>
 </svg>`);
-await exec("magick", [promoSvg, "-strip", "-define", "png:exclude-chunk=time,date", `PNG32:${resolve(generatedStore, "promo-small-440x280.png")}`]);
+await imageMagick([promoSvg, "-strip", "-define", "png:exclude-chunk=time,date", `PNG32:${resolve(generatedStore, "promo-small-440x280.png")}`]);
 
 if (check) {
   for (const size of [16, 32, 48, 64, 96, 128]) {
-    const { stdout } = await exec("magick", ["identify", "-format", "%wx%h", resolve(root, `icons/streambridge-${size}.png`)]);
+    const { stdout } = await identify(resolve(root, `icons/streambridge-${size}.png`));
     if (stdout !== `${size}x${size}`) throw new Error(`streambridge-${size}.png must be ${size}x${size}, got ${stdout}.`);
   }
   for (const [name, dimensions] of [["icon-128.png", "128x128"], ["promo-small-440x280.png", "440x280"], ["screenshot-detection-1280x800.png", "1280x800"]]) {
-    const { stdout } = await exec("magick", ["identify", "-format", "%wx%h", resolve(root, "store/assets", name)]);
+    const { stdout } = await identify(resolve(root, "store/assets", name));
     if (stdout !== dimensions) throw new Error(`${name} must be ${dimensions}, got ${stdout}.`);
   }
   await rm(temporary, { recursive: true, force: true });
