@@ -1,0 +1,12 @@
+node_modules/
+dist/
+artifacts/
+.tmp/
+playwright-report/
+test-results/
+test/sites.local.json
+test-results-android/
+*.log
+.env
+.env.*
+!.env.example

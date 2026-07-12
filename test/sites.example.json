@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Local deterministic media",
+    "url": "http://127.0.0.1:8765/fixture",
+    "playSelector": "#play-direct",
+    "waitAfterPlayMs": 3000,
+    "expectedKind": "file",
+    "expectedHostPattern": "127.0.0.1"
+  }
+]

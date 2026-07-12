@@ -1,0 +1,41 @@
+{
+  "name": "streambridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A privacy-conscious Chrome and Firefox extension for finding verified stream URLs.",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
+    "fixtures": "node scripts/generate-fixtures.mjs",
+    "fixtures:serve": "node scripts/fixture-server.mjs",
+    "lint": "eslint src test scripts",
+    "typecheck": "tsc --noEmit",
+    "lint:webext": "npm run build && web-ext lint --source-dir dist/firefox --pretty",
+    "test": "tsx --test test/unit/*.test.ts",
+    "test:performance": "tsx --test test/unit/performance.test.ts",
+    "test:e2e": "npm run fixtures && npm run build && playwright test",
+    "test:sites": "npm run build && node scripts/check-live-sites.mjs",
+    "verify": "npm run test && npm run typecheck && npm run lint && npm run lint:webext && npm run test:e2e && npm run package"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.16",
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/chrome": "^0.1.36",
+    "@types/node": "^24.0.0",
+    "@types/webextension-polyfill": "^0.12.3",
+    "esbuild": "^0.28.1",
+    "eslint": "^9.39.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.50.0",
+    "web-ext": "^10.5.0"
+  }
+}
