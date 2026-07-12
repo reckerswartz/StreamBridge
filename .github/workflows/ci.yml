@@ -19,14 +19,23 @@ jobs:
       - uses: browser-actions/setup-firefox@v1
         with:
           firefox-version: latest
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg zip
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick zip
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm audit --audit-level=high
       - run: npm run verify
+      - run: npm run release:reproducible
       - run: npm run stress:control
+      - uses: actions/upload-artifact@v7
+        with:
+          name: streambridge-packages-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: streambridge-memory-report
           path: .tmp/stress/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,6 @@
+title: StreamBridge
+description: Privacy-conscious stream detection for Chrome and Firefox
+theme: minima
+header_pages:
+  - privacy.md
+  - support.md

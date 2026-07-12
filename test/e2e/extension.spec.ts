@@ -5,7 +5,9 @@ import { resolve } from "node:path";
 
 test("captures after Play, reveals verified overlay, and plays in the browser", async () => {
   const profile = await mkdtemp(resolve(tmpdir(), "streambridge-e2e-"));
-  const extension = resolve(import.meta.dirname, "../../dist/chrome");
+  const extension = process.env.STREAMBRIDGE_EXTENSION_DIR
+    ? resolve(process.env.STREAMBRIDGE_EXTENSION_DIR)
+    : resolve(import.meta.dirname, "../../dist/chrome");
   const context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: true,
@@ -44,7 +46,9 @@ test("captures after Play, reveals verified overlay, and plays in the browser", 
 
 test("validates HLS, renders quality metadata, and plays through hls.js", async () => {
   const profile = await mkdtemp(resolve(tmpdir(), "streambridge-hls-"));
-  const extension = resolve(import.meta.dirname, "../../dist/chrome");
+  const extension = process.env.STREAMBRIDGE_EXTENSION_DIR
+    ? resolve(process.env.STREAMBRIDGE_EXTENSION_DIR)
+    : resolve(import.meta.dirname, "../../dist/chrome");
   const context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: true,

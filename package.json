@@ -11,6 +11,13 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "package": "node scripts/package.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "release:reproducible": "node scripts/check-reproducible.mjs",
+    "store:chrome:submit": "node scripts/submit-chrome.mjs",
+    "store:mozilla:fetch": "node scripts/fetch-amo-xpi.mjs",
+    "test:signed-firefox": "node scripts/test-signed-firefox.mjs",
+    "assets:generate": "node scripts/generate-store-assets.mjs",
+    "assets:check": "node scripts/generate-store-assets.mjs --check",
     "fixtures": "node scripts/generate-fixtures.mjs",
     "fixtures:serve": "node scripts/fixture-server.mjs",
     "lint": "eslint src test scripts",
@@ -19,13 +26,14 @@
     "test": "tsx --test test/unit/*.test.ts",
     "test:performance": "tsx --test test/unit/performance.test.ts",
     "test:e2e": "npm run fixtures && npm run build && playwright test",
+    "test:package": "node scripts/test-chrome-package.mjs",
     "test:sites": "npm run build && node scripts/check-live-sites.mjs",
     "stress:control": "npm run fixtures && npm run build && node scripts/stress-streams.mjs --suite control",
     "stress:public": "npm run fixtures && npm run build && node scripts/stress-streams.mjs --suite public",
     "stress:live": "npm run build && node scripts/stress-streams.mjs --suite missav && node scripts/stress-streams.mjs --suite supjav",
     "stress:android": "npm run fixtures && npm run build && node scripts/stress-android.mjs",
     "stress": "npm run stress:control && npm run stress:public && npm run stress:live",
-    "verify": "npm run test && npm run typecheck && npm run lint && npm run lint:webext && npm run test:e2e && npm run package"
+    "verify": "npm run test && npm run typecheck && npm run lint && npm run lint:webext && npm run test:e2e && npm run assets:check && npm run release:check && npm run package && npm run test:package"
   },
   "dependencies": {
     "hls.js": "^1.6.16",
@@ -38,6 +46,7 @@
     "@types/webextension-polyfill": "^0.12.3",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.0",
+    "google-auth-library": "^10.9.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.50.0",

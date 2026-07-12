@@ -1,0 +1,17 @@
+{
+  "language": "en",
+  "category": "Tools",
+  "name": "StreamBridge",
+  "summary": "Find verified HLS and media URLs, then play, copy, or share them.",
+  "singlePurpose": "Detect media requested by the current page and provide user-controlled playback, copy, and share actions for portable URLs.",
+  "privacyPolicy": "https://reckerswartz.github.io/StreamBridge/privacy.html",
+  "supportUrl": "https://reckerswartz.github.io/StreamBridge/support.html",
+  "remoteCode": false,
+  "dataUse": {
+    "local": ["browsing activity", "website resources"],
+    "transmitted": ["detected media URL to its media origin for credential-free validation"],
+    "analytics": false,
+    "advertising": false,
+    "sold": false
+  }
+}

@@ -2,19 +2,24 @@
   "manifest_version": 3,
   "name": "StreamBridge",
   "description": "Find verified HLS and media URLs, play them in the browser, copy them, or share them.",
-  "version": "0.1.0",
-  "permissions": ["activeTab", "clipboardWrite", "scripting", "storage", "tabs", "webRequest"],
+  "incognito": "not_allowed",
+  "permissions": ["clipboardWrite", "scripting", "storage", "tabs", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_title": "StreamBridge",
     "default_popup": "popup/index.html",
-    "default_icon": "icons/streambridge.svg"
+    "default_icon": {
+      "16": "icons/streambridge-16.png",
+      "32": "icons/streambridge-32.png"
+    }
   },
   "icons": {
-    "16": "icons/streambridge.svg",
-    "32": "icons/streambridge.svg",
-    "48": "icons/streambridge.svg",
-    "128": "icons/streambridge.svg"
+    "16": "icons/streambridge-16.png",
+    "32": "icons/streambridge-32.png",
+    "48": "icons/streambridge-48.png",
+    "64": "icons/streambridge-64.png",
+    "96": "icons/streambridge-96.png",
+    "128": "icons/streambridge-128.png"
   },
-  "web_accessible_resources": [{ "resources": ["icons/streambridge.svg"], "matches": ["<all_urls>"] }]
+  "web_accessible_resources": [{ "resources": ["icons/streambridge-32.png"], "matches": ["<all_urls>"] }]
 }

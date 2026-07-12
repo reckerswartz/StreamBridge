@@ -1,0 +1,54 @@
+name: Finalize signed Firefox release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    environment: mozilla-production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: latest
+      - uses: browser-actions/setup-geckodriver@latest
+        with:
+          token: ${{ github.token }}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick zip
+      - run: npm ci
+      - run: npm run package
+      - name: Download the public Mozilla-signed XPI
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: npm run store:mozilla:fetch
+      - name: Verify persistent signed installation across Firefox restart
+        run: npm run test:signed-firefox -- "artifacts/streambridge-${{ inputs.tag }}-firefox.xpi"
+      - name: Require successful minimum and stable Firefox Android matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list --workflow mobile.yml --commit "$GITHUB_SHA" --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion')
+          test "$conclusion" = success || { echo "Firefox Android workflow has not passed for $GITHUB_SHA (status: ${conclusion:-missing})."; exit 1; }
+      - name: Attach XPI and publish the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" "artifacts/streambridge-${{ inputs.tag }}-firefox.xpi" --clobber
+          gh release edit "${{ inputs.tag }}" --draft=false

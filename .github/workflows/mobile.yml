@@ -1,0 +1,59 @@
+name: Firefox Android
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  android-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        firefox: ["142.0", "147.0"]
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg zip
+      - name: Create API 36 emulator
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-36;google_apis;x86_64"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name streambridge_api36 --package "system-images;android-36;google_apis;x86_64"
+          "$ANDROID_HOME/emulator/emulator" -avd streambridge_api36 -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim -no-snapshot-load &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          until [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
+      - name: Install pinned official Firefox Android
+        env:
+          FIREFOX_VERSION: ${{ matrix.firefox }}
+        run: |
+          curl --fail --location --retry 3 --output /tmp/firefox.apk "https://archive.mozilla.org/pub/fenix/releases/${FIREFOX_VERSION}/android/fenix-${FIREFOX_VERSION}-android-x86_64/fenix-${FIREFOX_VERSION}.multi.android-x86_64.apk"
+          "$ANDROID_HOME/platform-tools/adb" install -r /tmp/firefox.apk
+      - name: Run Firefox Android extension and memory smoke test
+        env:
+          ADB_BIN: ${{ env.ANDROID_HOME }}/platform-tools/adb
+          EMULATOR_BIN: ${{ env.ANDROID_HOME }}/emulator/emulator
+          ADB_DEVICE: emulator-5554
+          ANDROID_AVD: streambridge_api36
+          FIREFOX_PACKAGE: org.mozilla.firefox
+          STRESS_TABS: 15
+        run: npm run stress:android
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: firefox-android-${{ matrix.firefox }}-${{ github.sha }}
+          path: .tmp/stress/
+          if-no-files-found: warn
+          retention-days: 30

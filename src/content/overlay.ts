@@ -64,7 +64,7 @@ if (!window.__streamBridgeOverlay) {
   toggleElement.setAttribute("aria-label", "Open verified streams");
   const iconElement = document.createElement("img");
   iconElement.alt = "";
-  iconElement.src = browser.runtime.getURL("icons/streambridge.svg");
+  iconElement.src = browser.runtime.getURL("icons/streambridge-32.png");
   const countElement = document.createElement("span");
   countElement.id = "count";
   countElement.textContent = "0";

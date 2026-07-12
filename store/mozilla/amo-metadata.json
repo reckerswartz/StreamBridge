@@ -1,0 +1,16 @@
+{
+  "categories": ["download-management"],
+  "summary": {
+    "en-US": "Find verified HLS and media URLs, then play, copy, or share them."
+  },
+  "description": {
+    "en-US": "StreamBridge detects media requested by the page you are viewing, performs a bounded credential-free portability check, and offers browser playback, exact URL copying, and platform sharing. It has no analytics, advertising, account, or developer-operated server. It does not bypass DRM or replay private headers."
+  },
+  "homepage": {
+    "en-US": "https://github.com/reckerswartz/StreamBridge"
+  },
+  "support_url": {
+    "en-US": "https://reckerswartz.github.io/StreamBridge/support.html"
+  },
+  "license": "GPL-3.0-only"
+}

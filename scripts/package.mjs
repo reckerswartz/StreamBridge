@@ -1,21 +1,76 @@
-import { mkdir, rm } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { promisify } from "node:util";
+import {
+  changelogEntry,
+  copyReleaseSource,
+  projectVersion,
+  root,
+  sha256,
+  sourceEpoch,
+  writeJson,
+  zipDirectory
+} from "./release-utils.mjs";
 
-const root = resolve(import.meta.dirname, "..");
+const exec = promisify(execFile);
 const artifacts = resolve(root, "artifacts");
+const staging = resolve(root, ".tmp/release-source");
+const version = await projectVersion();
+const tag = `v${version}`;
+const epoch = await sourceEpoch();
+const builtAt = new Date(epoch * 1000).toISOString();
+
 await import("./build.mjs");
 await rm(artifacts, { recursive: true, force: true });
 await mkdir(artifacts, { recursive: true });
 
-async function command(program, args, cwd) {
-  await new Promise((resolveCommand, reject) => {
-    const child = spawn(program, args, { cwd, stdio: "inherit" });
-    child.on("exit", (code) => code === 0 ? resolveCommand() : reject(new Error(`${program} exited ${code}`)));
-    child.on("error", reject);
-  });
+const outputs = [
+  { file: `streambridge-${tag}-chrome-store.zip`, browser: "chrome", purpose: "Chrome Web Store upload and developer-mode installation", signed: false },
+  { file: `streambridge-${tag}-firefox-store.zip`, browser: "firefox", purpose: "Mozilla Add-ons submission", signed: false }
+];
+
+await zipDirectory(resolve(root, "dist/chrome"), resolve(artifacts, outputs[0].file), epoch);
+await zipDirectory(resolve(root, "dist/firefox"), resolve(artifacts, outputs[1].file), epoch);
+
+await copyReleaseSource(staging, epoch);
+const sourceName = `streambridge-${tag}-source.zip`;
+await zipDirectory(staging, resolve(artifacts, sourceName), epoch);
+outputs.push({ file: sourceName, browser: "source", purpose: "Mozilla reviewer source and reproducible build input", signed: false });
+
+const storeAssetsName = `streambridge-${tag}-store-assets.zip`;
+await zipDirectory(resolve(root, "store/assets"), resolve(artifacts, storeAssetsName), epoch);
+outputs.push({ file: storeAssetsName, browser: "stores", purpose: "Store listing icons, screenshots, and promotional images", signed: false });
+
+const releaseNotes = await changelogEntry(version);
+await writeFile(resolve(artifacts, "RELEASE_NOTES.md"), releaseNotes.body);
+
+const { stdout: sbom } = await exec("npm", ["sbom", "--sbom-format", "spdx"], { cwd: root, maxBuffer: 30 * 1024 * 1024 });
+const sbomName = `streambridge-${tag}-sbom.spdx.json`;
+await writeFile(resolve(artifacts, sbomName), sbom);
+outputs.push({ file: sbomName, browser: "all", purpose: "SPDX dependency inventory", signed: false });
+
+for (const output of outputs) {
+  const file = resolve(artifacts, output.file);
+  output.sha256 = await sha256(file);
+  output.size = (await readFile(file)).byteLength;
 }
 
-await command("zip", ["-qr", resolve(artifacts, "streambridge-0.1.0-chrome.zip"), "."], resolve(root, "dist/chrome"));
-await command("zip", ["-qr", resolve(artifacts, "streambridge-0.1.0-firefox.zip"), "."], resolve(root, "dist/firefox"));
-console.log("Created Chrome and Firefox packages in artifacts/");
+const { stdout: commit } = await exec("git", ["rev-parse", "HEAD"], { cwd: root });
+await writeJson(resolve(artifacts, "release-manifest.json"), {
+  schemaVersion: 1,
+  name: "StreamBridge",
+  version,
+  tag,
+  commit: commit.trim(),
+  builtAt,
+  sourceDateEpoch: epoch,
+  artifacts: outputs
+});
+
+const checksumFiles = [...outputs.map((output) => output.file), "RELEASE_NOTES.md", "release-manifest.json"];
+const checksumLines = [];
+for (const name of checksumFiles.sort()) checksumLines.push(`${await sha256(resolve(artifacts, name))}  ${basename(name)}`);
+await writeFile(resolve(artifacts, "SHA256SUMS"), `${checksumLines.join("\n")}\n`);
+await rm(staging, { recursive: true, force: true });
+console.log(`Created reproducible ${tag} release assets in artifacts/`);

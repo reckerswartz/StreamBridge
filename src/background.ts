@@ -213,7 +213,7 @@ function enqueueValidation(tabId: number, candidate: StreamCandidate): boolean {
 }
 
 async function recordResponse(details: browser.WebRequest.OnHeadersReceivedDetailsType): Promise<void> {
-  if (details.tabId < 0 || details.frameId < 0) return;
+  if (details.incognito || details.tabId < 0 || details.frameId < 0) return;
   const mime = header(details.responseHeaders, "content-type");
   const classified = classifyResponse(details.url, mime);
   if (!classified) return;
