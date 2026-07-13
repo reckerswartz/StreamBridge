@@ -7,6 +7,10 @@ on:
         description: Existing draft release tag, for example v0.1.0
         required: true
         type: string
+      mobile_validation_sha:
+        description: Optional post-tag mobile-harness commit; extension and fixture inputs must match the tag
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -43,10 +47,21 @@ jobs:
       - name: Require successful minimum and stable Firefox Android matrix
         env:
           GH_TOKEN: ${{ github.token }}
+          MOBILE_VALIDATION_SHA: ${{ inputs.mobile_validation_sha }}
         run: |
           release_sha=$(git rev-parse HEAD)
-          conclusion=$(gh run list --workflow mobile.yml --commit "$release_sha" --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion')
-          test "$conclusion" = success || { echo "Firefox Android workflow has not passed for $release_sha (status: ${conclusion:-missing})."; exit 1; }
+          validation_sha=${MOBILE_VALIDATION_SHA:-$release_sha}
+          if [ "$validation_sha" != "$release_sha" ]; then
+            git fetch --no-tags origin "$validation_sha"
+            git diff --quiet "$release_sha" "$validation_sha" -- \
+              manifests src icons package.json package-lock.json \
+              scripts/build.mjs scripts/generate-fixtures.mjs scripts/fixture-server.mjs || {
+                echo "The mobile validation commit changes extension or fixture inputs relative to $release_sha."
+                exit 1
+              }
+          fi
+          conclusion=$(gh run list --workflow mobile.yml --commit "$validation_sha" --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion')
+          test "$conclusion" = success || { echo "Firefox Android workflow has not passed for $validation_sha (status: ${conclusion:-missing})."; exit 1; }
       - name: Attach XPI and publish the draft release
         env:
           GH_TOKEN: ${{ github.token }}

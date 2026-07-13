@@ -8,4 +8,6 @@
 6. Approve the protected Mozilla and Chrome submission environments after inspecting the draft assets.
 7. After Mozilla marks the listed version public, run the Store Finalize workflow. It downloads the signed XPI, runs persistent desktop and Android installation checks, attaches the XPI, and publishes the GitHub Release.
 
+If a post-tag commit changes only the Android test harness, supply its SHA as `mobile_validation_sha`. The workflow accepts that evidence only when Git proves that extension sources, manifest, dependencies, build script, and deterministic fixture inputs are unchanged from the release tag.
+
 The Chrome ZIP attached to GitHub is for store upload or developer-mode testing. Normal Chrome users install from the Chrome Web Store. Firefox users may install the Mozilla-signed XPI from GitHub or AMO. Android users install the separately signed VLC Bridge APK only when they need site-context playback in official VLC.
