@@ -84,6 +84,7 @@ jobs:
           fi
 
   submit-mozilla:
+    if: ${{ vars.AMO_AUTOMATION_ENABLED == 'true' }}
     needs: build-release
     runs-on: ubuntu-latest
     environment: mozilla-production
@@ -101,8 +102,8 @@ jobs:
       - run: npm run build
       - name: Submit listed version to Mozilla Add-ons
         env:
-          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
-          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: >-
           npx web-ext sign
           --source-dir dist/firefox
@@ -113,6 +114,7 @@ jobs:
           --upload-source-code "artifacts/streambridge-${GITHUB_REF_NAME}-source.zip"
 
   submit-chrome:
+    if: ${{ vars.CWS_AUTOMATION_ENABLED == 'true' }}
     needs: build-release
     runs-on: ubuntu-latest
     environment: chrome-production

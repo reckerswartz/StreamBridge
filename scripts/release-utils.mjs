@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 export const root = resolve(import.meta.dirname, "..");
+const buildMetadataName = ".streambridge-build.json";
 
 export async function projectVersion() {
   return JSON.parse(await readFile(resolve(root, "package.json"), "utf8")).version;
@@ -13,8 +14,34 @@ export async function projectVersion() {
 
 export async function sourceEpoch() {
   if (/^\d+$/.test(process.env.SOURCE_DATE_EPOCH || "")) return Number(process.env.SOURCE_DATE_EPOCH);
+  const metadata = await readBuildMetadata();
+  if (metadata) return metadata.sourceDateEpoch;
   const { stdout } = await exec("git", ["log", "-1", "--format=%ct"], { cwd: root });
   return Number(stdout.trim());
+}
+
+export async function sourceCommit() {
+  const metadata = await readBuildMetadata();
+  if (metadata) return metadata.commit;
+  const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: root });
+  return stdout.trim();
+}
+
+async function readBuildMetadata() {
+  try {
+    const metadata = JSON.parse(await readFile(resolve(root, buildMetadataName), "utf8"));
+    if (metadata.schemaVersion !== 1
+      || !Number.isInteger(metadata.sourceDateEpoch)
+      || !/^[a-f0-9]{40}$/i.test(metadata.commit)
+      || !Array.isArray(metadata.sourceFiles)
+      || !metadata.sourceFiles.includes(buildMetadataName)) {
+      throw new Error(`${buildMetadataName} is invalid.`);
+    }
+    return metadata;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 export async function filesBelow(directory, prefix = "") {
@@ -43,12 +70,21 @@ export async function zipDirectory(directory, destination, epoch) {
 export async function copyReleaseSource(destination, epoch) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
-  const { stdout } = await exec("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
-    cwd: root,
-    encoding: "buffer",
-    maxBuffer: 20 * 1024 * 1024
-  });
-  const paths = stdout.toString("utf8").split("\0").filter(Boolean).sort();
+  const metadata = await readBuildMetadata();
+  let paths;
+  let commit;
+  if (metadata) {
+    paths = metadata.sourceFiles.filter((path) => path !== buildMetadataName).sort();
+    commit = metadata.commit;
+  } else {
+    const { stdout } = await exec("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+      cwd: root,
+      encoding: "buffer",
+      maxBuffer: 20 * 1024 * 1024
+    });
+    paths = stdout.toString("utf8").split("\0").filter(Boolean).filter((path) => path !== buildMetadataName).sort();
+    commit = await sourceCommit();
+  }
   for (const relative of paths) {
     const source = resolve(root, relative);
     if (!(await stat(source)).isFile()) continue;
@@ -56,6 +92,13 @@ export async function copyReleaseSource(destination, epoch) {
     await mkdir(resolve(target, ".."), { recursive: true });
     await cp(source, target);
   }
+  const sourceFiles = [...paths, buildMetadataName].sort();
+  await writeJson(resolve(destination, buildMetadataName), {
+    schemaVersion: 1,
+    sourceDateEpoch: epoch,
+    commit,
+    sourceFiles
+  });
   await normalizeTree(destination, epoch);
 }
 

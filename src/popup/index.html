@@ -7,10 +7,11 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <header><img src="../../icons/streambridge.svg" alt=""><div><h1>StreamBridge</h1><p>Portable and site-context streams</p></div></header>
-    <section><strong id="count">0</strong><span>streams available on this tab</span></section>
-    <p>Start playback on the page. The bottom control appears after a bounded stream check succeeds and labels whether the URL is portable.</p>
+    <header><img src="../icons/streambridge-64.png" alt=""><div><h1>StreamBridge</h1><p>Portable and site-context streams</p></div></header>
+    <section aria-live="polite"><strong id="count">0</strong><span id="count-label">verified streams on this tab</span></section>
+    <p id="help">Start playback on the page. When StreamBridge verifies a media request, its bottom control shows whether the stream is portable or needs the source site.</p>
     <button id="clear">Clear this tab</button>
+    <p id="status" role="status" aria-live="polite"></p>
     <script src="popup.js"></script>
   </body>
 </html>

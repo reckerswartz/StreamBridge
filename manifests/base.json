@@ -3,8 +3,14 @@
   "name": "StreamBridge",
   "description": "Find portable or site-context HLS and media URLs, then play, copy, or share them.",
   "incognito": "not_allowed",
-  "permissions": ["clipboardWrite", "scripting", "storage", "tabs", "webRequest"],
+  "permissions": ["clipboardWrite", "scripting", "storage", "webRequest"],
   "host_permissions": ["<all_urls>"],
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content-resource-observer.js"],
+    "run_at": "document_start",
+    "all_frames": true
+  }],
   "action": {
     "default_title": "StreamBridge",
     "default_popup": "popup/index.html",

@@ -33,6 +33,7 @@ for (const target of targets) {
     entryPoints: {
       background: resolve(root, "src/background.ts"),
       "content-overlay": resolve(root, "src/content/overlay.ts"),
+      "content-resource-observer": resolve(root, "src/content/resource-observer.ts"),
       "popup/popup": resolve(root, "src/popup/popup.ts"),
       "player/player": resolve(root, "src/player/player.ts")
     },

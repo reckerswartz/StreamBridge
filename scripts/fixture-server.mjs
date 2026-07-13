@@ -6,14 +6,15 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const fixtures = resolve(root, ".tmp/fixtures");
 const hlsBundle = resolve(root, "node_modules/hls.js/dist/hls.min.js");
+const safeDemo = (await readFile(resolve(root, "docs/demo.html"), "utf8")).replace(/^---\nlayout: null\n---\n/, "");
 const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge demo</title><style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 80% 10%,#402b82 0,transparent 32%),#151126;color:#fff;font:16px system-ui,sans-serif}.shell{width:min(1060px,calc(100% - 48px));margin:0 auto;padding:68px 0}.eyebrow{color:#aa9bfa;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}h1{font-size:56px;line-height:1.03;margin:14px 0 20px;max-width:680px}.lead{font-size:20px;line-height:1.6;color:#d2ccea;max-width:620px}.actions{display:flex;gap:12px;margin-top:28px}button{border:1px solid #6d5ac7;border-radius:12px;padding:13px 18px;background:#2c2350;color:#fff;font-weight:700;cursor:pointer}button:first-child{background:#673ee8}.screen{min-height:330px;border:1px solid #5c4d91;border-radius:24px;background:linear-gradient(145deg,#27213e,#19152c);box-shadow:0 30px 80px #090711;padding:22px}.screen p{color:#a9a0c7}.legal{margin-top:50px;color:#81789f;font-size:13px}@media(max-width:760px){.hero{grid-template-columns:1fr}h1{font-size:42px}}
 </style></head><body><main class="shell"><div class="hero"><section><div class="eyebrow">Private, local stream detection</div><h1>Open verified media in the player you choose.</h1><p class="lead">StreamBridge detects HLS and direct media after playback starts, validates portability without credentials, and keeps results in session memory.</p><div class="actions">
 <button id="play-direct">Play direct media</button><button id="play-webm">Play WebM</button><button id="request-hls">Detect HLS qualities</button></div></section><section class="screen"><strong>Deterministic media demo</strong><p>Start a sample to reveal the StreamBridge controls.</p><div id="player"></div></section></div><p class="legal">Test fixture uses generated media. No browsing data leaves the device except credential-free requests to the selected media origin.</p></main>
-<script>
-document.querySelector('#play-direct').onclick=()=>{const v=document.createElement('video');v.id='fixture-video';v.controls=true;v.src='/media/sample.mp4?token=fixture-secret';document.querySelector('#player').replaceChildren(v);v.play().catch(()=>{});};
-document.querySelector('#play-webm').onclick=()=>{const v=document.createElement('video');v.id='fixture-video';v.controls=true;v.src='/media/sample.webm?token=fixture-secret';document.querySelector('#player').replaceChildren(v);v.play().catch(()=>{});};
-document.querySelector('#request-hls').onclick=()=>fetch('/media/master.m3u8?token=fixture-secret').then(r=>r.text());
+<script src="/vendor/hls.min.js"></script><script>
+document.querySelector('#play-direct').onclick=()=>{const v=document.createElement('video');v.id='fixture-video';v.controls=true;v.style='display:block;width:640px;max-width:100%;aspect-ratio:16/9';v.src='/media/sample.mp4?token=fixture-secret';document.querySelector('#player').replaceChildren(v);v.play().catch(()=>{});};
+document.querySelector('#play-webm').onclick=()=>{const v=document.createElement('video');v.id='fixture-video';v.controls=true;v.style='display:block;width:640px;max-width:100%;aspect-ratio:16/9';v.src='/media/sample.webm?token=fixture-secret';document.querySelector('#player').replaceChildren(v);v.play().catch(()=>{});};
+document.querySelector('#request-hls').onclick=()=>{const v=document.createElement('video');v.id='fixture-video';v.controls=true;v.muted=true;v.playsInline=true;v.style='display:block;width:640px;max-width:100%;aspect-ratio:16/9';document.querySelector('#player').replaceChildren(v);const hls=new Hls({maxBufferLength:8,maxMaxBufferLength:12,backBufferLength:4});hls.loadSource('/media/master.m3u8?token=fixture-secret');hls.attachMedia(v);hls.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));};
 </script></body></html>`;
 
 const contextPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge site-context demo</title></head><body>
@@ -29,6 +30,65 @@ document.querySelector('#start-context').onclick=async()=>{
   await response.text();
 };
 </script></body></html>`;
+
+const pageConfigPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge page-config fallback</title></head><body>
+<main><h1>Player configuration fallback fixture</h1><button id="start-config">Start configured stream</button>
+<video id="config-video" controls muted playsinline style="display:block;width:640px;height:360px;max-width:100%;margin-top:20px"></video></main>
+<script>
+globalThis.videoPlayerConfig={mediaDefinitions:[{format:'hls',quality:'720',defaultQuality:true,videoUrl:'http://localhost:8765/context-media/master.m3u8?config=worker-fixture'}]};
+document.querySelector('#start-config').onclick=async()=>{
+  const video=document.querySelector('#config-video');
+  video.src='/media/sample.mp4?pre-roll=fixture';
+  await video.play().catch(()=>undefined);
+  setTimeout(async()=>{video.src='/media/sample.webm?main=fixture';await video.play().catch(()=>undefined);},1500);
+};
+</script></body></html>`;
+
+const embeddedPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge embedded player demo</title></head><body>
+<main><h1>Cross-origin embedded player fixture</h1>
+<iframe id="embedded-player" title="Embedded player" src="http://localhost:8765/fixture/embedded-player" style="display:block;width:394px;height:222px;max-width:100%;border:0"></iframe>
+<iframe id="autoplay-ad" title="Autoplay advertisement fixture" src="http://localhost:8765/fixture/embedded-ad" style="display:block;width:300px;height:169px;border:0;margin-top:24px"></iframe>
+</main></body></html>`;
+
+const embeddedPlayerPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Embedded HLS player</title></head><body style="margin:0;background:#111">
+<button id="embedded-play" style="position:absolute;z-index:2;inset:80px auto auto 145px">Play</button>
+<video id="embedded-video" controls muted playsinline style="display:block;width:394px;height:222px;max-width:100%"></video>
+<script src="/vendor/hls.min.js"></script><script>
+const video=document.querySelector('#embedded-video');
+const hls=new Hls({autoStartLoad:true,maxBufferLength:8,maxMaxBufferLength:12,backBufferLength:4});
+hls.loadSource('/media/master.m3u8?embedded=main');
+hls.attachMedia(video);
+document.querySelector('#embedded-play').onclick=async()=>{
+  document.querySelector('#embedded-play').remove();
+  hls.loadSource('/media/master.m3u8?embedded=main');
+  await video.play().catch(()=>undefined);
+};
+</script></body></html>`;
+
+const embeddedAdPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Autoplay ad fixture</title></head><body style="margin:0;background:#311">
+<video id="ad-video" muted playsinline style="display:block;width:300px;height:169px"></video>
+<script src="/vendor/hls.min.js"></script><script>
+const video=document.querySelector('#ad-video');
+const hls=new Hls({maxBufferLength:4,maxMaxBufferLength:6,backBufferLength:2});
+hls.loadSource('/media/master.m3u8?embedded=ad');
+hls.attachMedia(video);
+void video.play().catch(()=>undefined);
+</script></body></html>`;
+
+const adapterPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamBridge adapter fixture</title></head><body style="margin:0;background:#111;color:#fff;font:16px system-ui">
+<main><h1>PNG-prefixed MPEG-TS fixture</h1><button id="adapter-play">Play transformed HLS</button><video id="adapter-video" controls muted playsinline style="display:block;width:640px;max-width:100%;aspect-ratio:16/9;margin-top:16px"></video></main>
+<script>
+const video=document.querySelector('#adapter-video');
+void fetch('/adapter-media/master.m3u8?adapter=fixture').then(response=>response.text());
+document.querySelector('#adapter-play').onclick=async()=>{video.src='/media/sample.mp4?adapter=site-decoder';await video.play().catch(()=>undefined);};
+</script></body></html>`;
+
+const adapterMaster = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360
+media.m3u8
+`;
+const pngPrefix = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082", "hex");
 
 const contextMaster = `#EXTM3U
 #EXT-X-VERSION:3
@@ -114,7 +174,7 @@ function stressPage(id, external) {
   const localUrl = id <= 5 ? `/media/sample.mp4?stream=${id}` : id <= 10 ? `/media/sample.webm?stream=${id}` : `/media/master.m3u8?stream=${id}`;
   const source = external ? publicSources[id - 1] : { kind: localKind, url: localUrl };
   return `<!doctype html><html><head><meta charset="utf-8"><title>StreamBridge stress ${id}</title></head><body>
-<h1>StreamBridge stress stream ${id}</h1><video id="stress-video" controls muted playsinline></video>
+<h1>StreamBridge stress stream ${id}</h1><video id="stress-video" controls muted playsinline style="display:block;width:394px;height:222px;max-width:100%"></video>
 <script src="/vendor/hls.min.js"></script><script>
 const video=document.querySelector('#stress-video');
 const source=${JSON.stringify(source)};
@@ -129,6 +189,7 @@ async function start(){
 function pause(){video.pause();}
 async function capture(){const response=await fetch(source.url,{headers:{Range:'bytes=0-4095'}});await response.body?.cancel().catch(()=>undefined);}
 window.streambridgeStress={start,pause,capture,id:${id},sourceKind:source.kind};
+if(new URL(location.href).searchParams.get('activate')==='1')document.addEventListener('click',()=>void start(),{once:true});
 if(new URL(location.href).searchParams.get('autoplay')==='1')void start();
 if(new URL(location.href).searchParams.get('capture')==='1')void capture();
 </script></body></html>`;
@@ -137,9 +198,39 @@ if(new URL(location.href).searchParams.get('capture')==='1')void capture();
 const server = createServer(async (request, response) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Cache-Control", "no-store");
+  if (request.url?.startsWith("/demo")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(safeDemo);
+    return;
+  }
+  if (request.url?.startsWith("/fixture/embedded-player")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(embeddedPlayerPage);
+    return;
+  }
+  if (request.url?.startsWith("/fixture/embedded-ad")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(embeddedAdPage);
+    return;
+  }
+  if (request.url?.startsWith("/fixture/embedded")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(embeddedPage);
+    return;
+  }
+  if (request.url?.startsWith("/fixture/adapter")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(adapterPage);
+    return;
+  }
   if (request.url?.startsWith("/fixture/context")) {
     response.setHeader("Content-Type", "text/html; charset=utf-8");
     response.end(contextPage);
+    return;
+  }
+  if (request.url?.startsWith("/fixture/page-config")) {
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(pageConfigPage);
     return;
   }
   if (request.url?.startsWith("/fixture")) {
@@ -148,6 +239,37 @@ const server = createServer(async (request, response) => {
     return;
   }
   const requestUrl = new URL(request.url || "/", "http://127.0.0.1:8765");
+  if (requestUrl.pathname === "/adapter-media/master.m3u8") {
+    response.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    response.setHeader("Content-Length", Buffer.byteLength(adapterMaster));
+    response.end(adapterMaster);
+    return;
+  }
+  if (requestUrl.pathname === "/adapter-media/media.m3u8") {
+    let manifest = await readFile(resolve(fixtures, "media.m3u8"), "utf8");
+    manifest = manifest.replace(/segment-(\d+)\.ts/g, "segment-$1.png");
+    response.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    response.setHeader("Content-Length", Buffer.byteLength(manifest));
+    response.end(manifest);
+    return;
+  }
+  const adapterSegment = requestUrl.pathname.match(/^\/adapter-media\/segment-(\d+)\.png$/);
+  if (adapterSegment) {
+    const media = await readFile(resolve(fixtures, `segment-${adapterSegment[1]}.ts`));
+    const wrapped = Buffer.concat([pngPrefix, media]);
+    const range = request.headers.range?.match(/bytes=(\d+)-(\d*)/);
+    const start = range ? Number(range[1]) : 0;
+    const end = range && range[2] ? Math.min(Number(range[2]), wrapped.length - 1) : wrapped.length - 1;
+    if (range) {
+      response.statusCode = 206;
+      response.setHeader("Content-Range", `bytes ${start}-${end}/${wrapped.length}`);
+    }
+    response.setHeader("Accept-Ranges", "bytes");
+    response.setHeader("Content-Type", "image/png");
+    response.setHeader("Content-Length", end - start + 1);
+    response.end(wrapped.subarray(start, end + 1));
+    return;
+  }
   if (requestUrl.pathname === "/diagnostics/requests") {
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify(requestDiagnostics));

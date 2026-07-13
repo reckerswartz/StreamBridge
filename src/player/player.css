@@ -6,5 +6,7 @@ header img { width: 52px; height: 52px; }
 h1 { margin: 0; font-size: 24px; }
 header p { margin: 4px 0 0; color: #aebce9; overflow-wrap: anywhere; }
 video { display: block; width: 100%; max-height: 72vh; border-radius: 16px; background: #000; box-shadow: 0 20px 70px #000a; }
+#start-playback { margin-top: 14px; border: 1px solid #7767dc; border-radius: 10px; padding: 11px 16px; background: #5a42d6; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+#start-playback[hidden] { display: none; }
 #status { min-height: 24px; color: #b9c7ef; }
 #status[data-error="true"] { color: #ff8e99; }

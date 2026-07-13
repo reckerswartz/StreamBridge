@@ -1,5 +1,4 @@
-import { chromium } from "@playwright/test";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -55,12 +54,18 @@ if (check) {
     const { stdout } = await identify(resolve(root, `icons/streambridge-${size}.png`));
     if (stdout !== `${size}x${size}`) throw new Error(`streambridge-${size}.png must be ${size}x${size}, got ${stdout}.`);
   }
-  for (const [name, dimensions] of [["icon-128.png", "128x128"], ["promo-small-440x280.png", "440x280"], ["screenshot-detection-1280x800.png", "1280x800"]]) {
+  for (const [name, dimensions] of [
+    ["icon-128.png", "128x128"],
+    ["promo-small-440x280.png", "440x280"],
+    ["screenshot-detection-1280x800.png", "1280x800"],
+    ["screenshot-browser-player-1280x800.png", "1280x800"],
+    ["screenshot-android-720x1280.png", "720x1280"]
+  ]) {
     const { stdout } = await identify(resolve(root, "store/assets", name));
     if (stdout !== dimensions) throw new Error(`${name} must be ${dimensions}, got ${stdout}.`);
   }
   await rm(temporary, { recursive: true, force: true });
-  console.log("Store icons, promotional image, and screenshot dimensions are current.");
+  console.log("Store icons, promotional image, and safe screenshot dimensions are current.");
   process.exit(0);
 }
 
@@ -69,35 +74,5 @@ await mkdir(resolve(root, "store/assets"), { recursive: true });
 for (const size of [16, 32, 48, 64, 96, 128]) await cp(resolve(generatedIcons, `streambridge-${size}.png`), resolve(root, `icons/streambridge-${size}.png`));
 for (const name of ["icon-128.png", "promo-small-440x280.png"]) await cp(resolve(generatedStore, name), resolve(root, "store/assets", name));
 
-await exec(process.execPath, ["scripts/generate-fixtures.mjs"], { cwd: root });
-await exec(process.execPath, ["scripts/build.mjs"], { cwd: root });
-const server = spawn(process.execPath, [resolve(root, "scripts/fixture-server.mjs")], { cwd: root, stdio: "ignore" });
-const profile = await mkdtemp(resolve(tmpdir(), "streambridge-assets-profile-"));
-let context;
-try {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try { if ((await fetch("http://127.0.0.1:8765/fixture")).ok) break; } catch { /* retry */ }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
-  }
-  const extension = resolve(root, "dist/chrome");
-  context = await chromium.launchPersistentContext(profile, {
-    channel: "chromium",
-    headless: true,
-    viewport: { width: 1280, height: 800 },
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`]
-  });
-  if (!context.serviceWorkers().length) await context.waitForEvent("serviceworker", { timeout: 10_000 });
-  const page = await context.newPage();
-  await page.goto("http://127.0.0.1:8765/fixture");
-  await page.locator("#request-hls").click();
-  const host = page.locator("#streambridge-host");
-  await host.waitFor({ state: "attached", timeout: 12_000 });
-  await host.evaluate((element) => element.shadowRoot.querySelector("#toggle").click());
-  await page.screenshot({ path: resolve(root, "store/assets/screenshot-detection-1280x800.png") });
-} finally {
-  await context?.close();
-  server.kill("SIGTERM");
-  await rm(profile, { recursive: true, force: true });
-  await rm(temporary, { recursive: true, force: true });
-}
-console.log("Generated manifest icons and clean store listing assets.");
+await rm(temporary, { recursive: true, force: true });
+console.log("Generated manifest icons and promotional store assets. Run npm run assets:capture for safe live screenshots.");

@@ -17,6 +17,13 @@ for (const size of [16, 32, 48, 64, 96, 128]) {
   await readFile(resolve(root, `icons/streambridge-${size}.png`));
 }
 
+const amoMetadata = JSON.parse(await readFile(resolve(root, "store/mozilla/amo-metadata.json"), "utf8"));
+if (!Array.isArray(amoMetadata.categories) || !amoMetadata.categories.length) throw new Error("AMO metadata requires at least one category.");
+if (!amoMetadata.summary?.["en-US"] || amoMetadata.summary["en-US"].length > 250) throw new Error("AMO metadata requires an en-US summary no longer than 250 characters.");
+if (amoMetadata.version?.license !== "GPL-3.0-only") throw new Error("AMO metadata must declare the version license as GPL-3.0-only.");
+if (amoMetadata.is_experimental !== false) throw new Error("AMO metadata must submit the standard public listing as non-experimental.");
+if (!amoMetadata.support_email?.["en-US"]) throw new Error("AMO metadata requires an en-US support email.");
+
 await changelogEntry(version);
 const explicitTag = process.argv.find((argument) => argument.startsWith("--tag="))?.split("=")[1]
   || (process.env.GITHUB_REF_TYPE === "tag" ? process.env.GITHUB_REF_NAME : "");

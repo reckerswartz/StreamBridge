@@ -8,6 +8,7 @@ import {
   projectVersion,
   root,
   sha256,
+  sourceCommit,
   sourceEpoch,
   writeJson,
   zipDirectory
@@ -65,13 +66,12 @@ for (const output of outputs) {
   output.size = (await readFile(file)).byteLength;
 }
 
-const { stdout: commit } = await exec("git", ["rev-parse", "HEAD"], { cwd: root });
 await writeJson(resolve(artifacts, "release-manifest.json"), {
   schemaVersion: 1,
   name: "StreamBridge",
   version,
   tag,
-  commit: commit.trim(),
+  commit: await sourceCommit(),
   builtAt,
   sourceDateEpoch: epoch,
   artifacts: outputs

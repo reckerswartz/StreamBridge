@@ -16,7 +16,7 @@ export interface ClassifiedResponse {
   mime: string;
 }
 
-export function classifyResponse(rawUrl: string, contentType = ""): ClassifiedResponse | null {
+export function classifyResponse(rawUrl: string, contentType = "", requestType = ""): ClassifiedResponse | null {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -29,6 +29,10 @@ export function classifyResponse(rawUrl: string, contentType = ""): ClassifiedRe
   const mime = contentType.split(";", 1)[0].trim().toLowerCase();
   if (/\.m3u8?$/i.test(parsed.pathname) || HLS_MIME.has(mime)) return { kind: "hls", mime: mime || "application/vnd.apple.mpegurl" };
   if (FILE_EXTENSIONS.test(parsed.pathname) || FILE_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix))) {
+    // HLS fMP4 fragments are normally fetched through XHR/fetch and can look
+    // exactly like direct MP4 files. Only the browser's media request type is
+    // eligible for a standalone file candidate.
+    if (requestType && requestType !== "media") return null;
     return { kind: "file", mime: mime || "application/octet-stream" };
   }
   return null;
@@ -36,7 +40,9 @@ export function classifyResponse(rawUrl: string, contentType = ""): ClassifiedRe
 
 export function safeDisplayUrl(rawUrl: string): string {
   const parsed = new URL(rawUrl);
-  const path = parsed.pathname.length > 96 ? `…${parsed.pathname.slice(-95)}` : parsed.pathname;
+  const mediaPath = parsed.pathname.match(/\/(?:hls|media|streams?|videos?)\//i);
+  const visiblePath = mediaPath?.index !== undefined ? parsed.pathname.slice(mediaPath.index) : parsed.pathname;
+  const path = visiblePath.length > 96 ? `…${visiblePath.slice(-95)}` : visiblePath;
   return `${parsed.host}${path}`;
 }
 

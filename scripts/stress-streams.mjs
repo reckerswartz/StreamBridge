@@ -7,11 +7,12 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const args = Object.fromEntries(process.argv.slice(2).map((value, index, values) => value.startsWith("--") ? [value.slice(2), values[index + 1]?.startsWith("--") ? "true" : values[index + 1] || "true"] : null).filter(Boolean));
 const suite = String(args.suite || process.env.STRESS_SUITE || "control");
-const tabLimit = Number(args.tabs || process.env.STRESS_TABS || 15);
+const tabsPerSource = Number(args.tabs || process.env.STRESS_TABS || 15);
+let tabLimit = tabsPerSource;
 const cycles = Number(args.cycles || process.env.STRESS_CYCLES || 3);
 const captureSeconds = Number(args.capture || process.env.STRESS_CAPTURE_SECONDS || 8);
 const burstSeconds = Number(args.burst || process.env.STRESS_BURST_SECONDS || 60);
-const liveSuite = suite === "missav" || suite === "supjav";
+const liveSuite = suite === "live";
 const headed = process.env.HEADED === "1" || liveSuite;
 const startedAt = new Date();
 const stamp = startedAt.toISOString().replace(/[:.]/g, "-");
@@ -19,7 +20,7 @@ const reportDirectory = resolve(root, process.env.STRESS_REPORT_DIR || `.tmp/str
 const extension = resolve(root, "dist/chrome");
 const MIB = 1024 * 1024;
 
-if (!Number.isInteger(tabLimit) || tabLimit < 1 || tabLimit > 30) throw new Error("STRESS_TABS must be between 1 and 30.");
+if (!Number.isInteger(tabsPerSource) || tabsPerSource < 1 || tabsPerSource > 30) throw new Error("STRESS_TABS must be between 1 and 30 per source.");
 if (!Number.isInteger(cycles) || cycles < 1 || cycles > 10) throw new Error("STRESS_CYCLES must be between 1 and 10.");
 
 function sleep(milliseconds) { return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)); }
@@ -68,31 +69,44 @@ async function startFixtureServer() {
   throw new Error("Fixture server did not start.");
 }
 
-async function discoverLiveUrls(name) {
+async function discoverLiveUrls() {
+  if (process.env.STREAMBRIDGE_LIVE_SITES !== "1") throw new Error("Live stress checks require STREAMBRIDGE_LIVE_SITES=1.");
+  const siteFile = resolve(root, process.env.STREAMBRIDGE_SITE_FILE || "test/sites.local.json");
+  const catalog = JSON.parse(await readFile(siteFile, "utf8"));
+  const sources = catalog.filter((entry) => entry.stressDiscovery?.listingUrl && entry.stressDiscovery?.linkSelector);
+  if (!sources.length) throw new Error("No stressDiscovery entries were found in the ignored local site catalog.");
   const browser = await chromium.launch({ channel: "chromium", headless: false });
-  const page = await browser.newPage();
   try {
-    const listing = name === "missav" ? "https://missav.ws/dm265/en" : "https://supjav.com/";
-    await page.goto(listing, { waitUntil: "domcontentloaded", timeout: 45_000 });
-    for (let attempt = 0; attempt < 24 && /just a moment|checking/i.test(await page.title()); attempt += 1) await sleep(5000);
-    const links = name === "missav"
-      ? await page.locator("a[href]:has(img)").evaluateAll((items) => items.map((item) => item.href))
-      : await page.locator("a[href$='.html']").evaluateAll((items) => items.map((item) => item.href));
-    const unique = [];
-    const seen = new Set();
-    for (const value of links) {
-      let url;
-      try { url = new URL(value); } catch { continue; }
-      const accepted = name === "missav"
-        ? (/^\/en\/[a-z0-9-]+$/i.test(url.pathname) || /^\/dm\d+\/en\/[a-z0-9-]+$/i.test(url.pathname))
-        : /^\/\d+\.html$/.test(url.pathname);
-      if (!accepted || seen.has(url.pathname)) continue;
-      seen.add(url.pathname);
-      unique.push(url.href);
-      if (unique.length === tabLimit) break;
+    const discovered = [];
+    for (const source of sources) {
+      const page = await browser.newPage();
+      const configuration = source.stressDiscovery;
+      try {
+        const listing = new URL(configuration.listingUrl);
+        await page.goto(listing.href, { waitUntil: "domcontentloaded", timeout: 45_000 });
+        for (let attempt = 0; attempt < 24 && /just a moment|checking/i.test(await page.title()); attempt += 1) await sleep(5000);
+        const links = await page.locator(configuration.linkSelector).evaluateAll((items) => items.map((item) => item.href || item.getAttribute("href")).filter(Boolean));
+        const includePath = configuration.includePathPattern ? new RegExp(configuration.includePathPattern, configuration.includePathFlags || "") : null;
+        const unique = [];
+        const seen = new Set();
+        for (const value of links) {
+          let url;
+          try { url = new URL(value, listing); } catch { continue; }
+          if (configuration.sameOrigin !== false && url.origin !== listing.origin) continue;
+          if (includePath && !includePath.test(url.pathname)) continue;
+          const key = `${url.origin}${url.pathname}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          unique.push(url.href);
+          if (unique.length === tabsPerSource) break;
+        }
+        if (unique.length < tabsPerSource) throw new Error(`${source.name || "Configured source"} exposed only ${unique.length} usable page URLs.`);
+        discovered.push(...unique);
+      } finally {
+        await page.close();
+      }
     }
-    if (unique.length < tabLimit) throw new Error(`${name} exposed only ${unique.length} usable page URLs.`);
-    return unique;
+    return discovered;
   } finally {
     await browser.close();
   }
@@ -232,8 +246,9 @@ let profile;
 try {
   if (suite === "control" || suite === "public") fixtureServer = await startFixtureServer();
   const urls = liveSuite
-    ? await discoverLiveUrls(suite)
+    ? await discoverLiveUrls()
     : Array.from({ length: tabLimit }, (_, index) => `http://127.0.0.1:8765/stress/${suite}/${index + 1}`);
+  tabLimit = urls.length;
   profile = await mkdtemp(resolve(tmpdir(), `streambridge-stress-${suite}-`));
   context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",

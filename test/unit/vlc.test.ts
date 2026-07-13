@@ -27,6 +27,16 @@ test("rejects unsupported protocols and URL credentials", () => {
   assert.throws(() => createVlcPlaylist({ streamUrl: "https://user:pass@cdn.test/video.m3u8", referrerUrl: "https://page.test/", userAgent: "test" }), /does not include URL credentials/);
 });
 
+test("creates a portable playlist without leaking page context", () => {
+  const playlist = createVlcPlaylist({
+    streamUrl: "https://cdn.test/video.mp4?token=fixture-secret",
+    userAgent: "Fixture Browser",
+    title: "Portable MP4"
+  });
+  assert.equal(playlist.includes("http-referrer"), false);
+  assert.equal(playlist.includes("https://cdn.test/video.mp4?token=fixture-secret"), true);
+});
+
 test("creates predictable safe playlist filenames", () => {
   assert.equal(vlcPlaylistFilename("1280×720 / High"), "streambridge-1280-720-high.m3u");
   assert.equal(vlcPlaylistFilename("\n\r"), "streambridge-stream.m3u");

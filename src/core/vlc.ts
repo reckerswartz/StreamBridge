@@ -1,6 +1,6 @@
 export interface VlcPlaylistOptions {
   streamUrl: string;
-  referrerUrl: string;
+  referrerUrl?: string;
   userAgent: string;
   title?: string;
 }
@@ -22,13 +22,13 @@ function httpUrl(rawUrl: string): URL {
 
 export function createVlcPlaylist(options: VlcPlaylistOptions): string {
   const stream = httpUrl(options.streamUrl);
-  const referrer = httpUrl(options.referrerUrl);
   const userAgent = singleLine(options.userAgent, 512);
   const title = singleLine(options.title || "StreamBridge stream", 160) || "StreamBridge stream";
-  const lines = [
-    "#EXTM3U",
-    `#EXTVLCOPT:http-referrer=${referrer.origin}/`
-  ];
+  const lines = ["#EXTM3U"];
+  if (options.referrerUrl) {
+    const referrer = httpUrl(options.referrerUrl);
+    lines.push(`#EXTVLCOPT:http-referrer=${referrer.origin}/`);
+  }
   if (userAgent) lines.push(`#EXTVLCOPT:http-user-agent=${userAgent}`);
   lines.push(`#EXTINF:-1,${title}`, stream.href, "");
   return lines.join("\n");

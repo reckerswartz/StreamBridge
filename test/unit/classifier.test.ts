@@ -13,6 +13,8 @@ test("suppresses segments and does not infer extensions from query values", () =
   assert.equal(classifyResponse("https://cdn.test/video_720p_h264_init_random.mp4", "video/mp4"), null);
   assert.equal(classifyResponse("https://cdn.test/path/init.mp4", "video/mp4"), null);
   assert.equal(classifyResponse("https://cdn.test/api?file=movie.mp4", "application/json"), null);
+  assert.equal(classifyResponse("https://cdn.test/chunk-42.mp4", "video/mp4", "xmlhttprequest"), null);
+  assert.equal(classifyResponse("https://cdn.test/movie.mp4", "video/mp4", "media")?.kind, "file");
 });
 
 test("stable IDs are deterministic", () => {

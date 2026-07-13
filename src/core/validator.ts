@@ -1,11 +1,13 @@
 import { parseHlsManifest } from "./hls";
-import type { StreamAccessMode, StreamCandidate } from "../shared/types";
+import { inspectStreamAdapter } from "./adapter";
+import type { StreamAccessMode, StreamAdapter, StreamCandidate } from "../shared/types";
 
 export const MAX_PROBE_BYTES = 4096;
 export const MAX_MANIFEST_BYTES = 512 * 1024;
 export const MAX_VALIDATION_BYTES = 768 * 1024;
 export const VALIDATION_FRESH_MS = 5 * 60 * 1000;
 export const MIN_COMPLETE_HLS_SECONDS = 10;
+const MAX_HLS_MANIFEST_DEPTH = 4;
 
 export interface ValidationResult {
   status: "playable" | "rejected";
@@ -14,6 +16,7 @@ export interface ValidationResult {
   variants?: StreamCandidate["variants"];
   durationSeconds?: number;
   accessMode?: StreamAccessMode;
+  adapter?: StreamAdapter;
   bytesRead: number;
 }
 
@@ -90,6 +93,10 @@ async function probe(url: string, maximum: number, signal?: AbortSignal): Promis
   }
 }
 
+function looksLikeManifest(url: string): boolean {
+  try { return /\.m3u8$/i.test(new URL(url).pathname); } catch { return false; }
+}
+
 export async function validateCandidate(candidate: StreamCandidate, signal?: AbortSignal): Promise<ValidationResult> {
   try {
     if (candidate.kind === "file") {
@@ -100,27 +107,48 @@ export async function validateCandidate(candidate: StreamCandidate, signal?: Abo
       return { status: "playable", reason: "standard-media", container, bytesRead: bytes.length, accessMode: "portable" };
     }
 
-    const manifestBytes = await probe(candidate.url, MAX_MANIFEST_BYTES, signal);
-    const manifestText = new TextDecoder().decode(manifestBytes);
-    const manifest = parseHlsManifest(manifestText, candidate.url);
-    const mediaUrl = manifest.type === "master" ? manifest.variants[0]?.url : candidate.url;
-    if (!mediaUrl) return { status: "rejected", reason: "empty-master", bytesRead: manifestBytes.length };
-    const mediaBytes = manifest.type === "master" ? await probe(mediaUrl, MAX_MANIFEST_BYTES, signal) : manifestBytes;
-    const media = parseHlsManifest(new TextDecoder().decode(mediaBytes), mediaUrl);
-    if (!media.firstSegmentUrl) return { status: "rejected", reason: "no-media-segment", bytesRead: manifestBytes.length + mediaBytes.length };
+    let currentUrl = candidate.url;
+    let currentBytes = await probe(currentUrl, MAX_MANIFEST_BYTES, signal);
+    let bytesRead = currentBytes.length;
+    let current = parseHlsManifest(new TextDecoder().decode(currentBytes), currentUrl);
+    let variants: StreamCandidate["variants"] = [];
+    for (let depth = 0; depth < MAX_HLS_MANIFEST_DEPTH; depth += 1) {
+      if (current.type === "master") {
+        if (!current.variants[0]) return { status: "rejected", reason: "empty-master", bytesRead };
+        variants = current.variants;
+        currentUrl = current.variants[0].url;
+        currentBytes = await probe(currentUrl, MAX_MANIFEST_BYTES, signal);
+        bytesRead += currentBytes.length;
+        current = parseHlsManifest(new TextDecoder().decode(currentBytes), currentUrl);
+        continue;
+      }
+      if (current.firstSegmentUrl && looksLikeManifest(current.firstSegmentUrl)) {
+        currentUrl = current.firstSegmentUrl;
+        currentBytes = await probe(currentUrl, MAX_MANIFEST_BYTES, signal);
+        bytesRead += currentBytes.length;
+        current = parseHlsManifest(new TextDecoder().decode(currentBytes), currentUrl);
+        continue;
+      }
+      break;
+    }
+    const media = current;
+    if (!media.firstSegmentUrl) return { status: "rejected", reason: "no-media-segment", bytesRead };
+    if (media.type === "master" || looksLikeManifest(media.firstSegmentUrl)) return { status: "rejected", reason: "manifest-depth-limit", bytesRead };
     if (media.endList && (media.durationSeconds || 0) < MIN_COMPLETE_HLS_SECONDS) {
-      return { status: "rejected", reason: "short-complete-hls", bytesRead: manifestBytes.length + mediaBytes.length };
+      return { status: "rejected", reason: "short-complete-hls", bytesRead };
     }
     const segment = await probe(media.firstSegmentUrl, MAX_PROBE_BYTES, signal);
     const sniffedContainer = sniffContainer(segment);
-    if (!sniffedContainer || sniffedContainer === "image") return { status: "rejected", reason: sniffedContainer === "image" ? "image-wrapped" : "unknown-media", bytesRead: manifestBytes.length + mediaBytes.length + segment.length };
-    const container = sniffedContainer === "fmp4-fragment" ? "mp4" : sniffedContainer;
+    bytesRead += segment.length;
+    const adapter = sniffedContainer === "image" ? inspectStreamAdapter(segment) : null;
+    if (!sniffedContainer || (sniffedContainer === "image" && !adapter)) return { status: "rejected", reason: sniffedContainer === "image" ? "image-wrapped" : "unknown-media", bytesRead };
+    const container = adapter ? "mpeg-ts" : sniffedContainer === "fmp4-fragment" ? "mp4" : sniffedContainer;
     const durationSeconds = media.durationSeconds;
-    const variants = manifest.variants.map((variant) => ({
+    const estimatedVariants = variants.map((variant) => ({
       ...variant,
       estimatedBytes: durationSeconds && variant.bandwidth ? Math.round((durationSeconds * variant.bandwidth) / 8) : undefined
     }));
-    return { status: "playable", reason: "portable-hls", container, variants, durationSeconds, bytesRead: manifestBytes.length + mediaBytes.length + segment.length, accessMode: "portable" };
+    return { status: "playable", reason: adapter ? "portable-adapter-hls" : "portable-hls", container, variants: estimatedVariants, durationSeconds, bytesRead, accessMode: "portable", adapter: adapter?.adapter };
   } catch (error) {
     return { status: "rejected", reason: error instanceof Error ? error.message.slice(0, 80) : "validation-error", bytesRead: 0 };
   }

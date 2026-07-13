@@ -10,6 +10,9 @@ export async function validateInPageContext(rawUrl: string, kind: StreamKind): P
   const MAX_MANIFEST_BYTES = 512 * 1024;
   const MAX_VALIDATION_BYTES = 768 * 1024;
   const MIN_COMPLETE_HLS_SECONDS = 10;
+  const MAX_HLS_MANIFEST_DEPTH = 4;
+  const MAX_ADAPTER_PREFIX_BYTES = 64 * 1024;
+  const MAX_ADAPTER_PADDING_BYTES = 4 * 1024;
   let bytesRead = 0;
 
   const stableId = (value: string): string => {
@@ -38,6 +41,38 @@ export async function validateInPageContext(rawUrl: string, kind: StreamKind): P
     if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return "audio";
     if (bytes.length >= 8 && bytes[0] === 0x89 && String.fromCharCode(...bytes.slice(1, 4)) === "PNG") return "image";
     if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image";
+    return null;
+  };
+
+  const adapterPayloadOffset = (bytes: Uint8Array): number | null => {
+    const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (bytes.length < signature.length || !signature.every((value, index) => bytes[index] === value)) return null;
+    let offset = signature.length;
+    for (let chunk = 0; chunk < 32 && offset + 12 <= bytes.length && offset <= MAX_ADAPTER_PREFIX_BYTES; chunk += 1) {
+      const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
+      const end = offset + 12 + length;
+      if (end > bytes.length || end > MAX_ADAPTER_PREFIX_BYTES) return null;
+      const type = String.fromCharCode(...bytes.slice(offset + 4, offset + 8));
+      offset = end;
+      if (type !== "IEND") continue;
+      if (length !== 0) return null;
+      const limit = Math.min(bytes.length - 1, offset + MAX_ADAPTER_PADDING_BYTES);
+      for (let payloadOffset = offset; payloadOffset <= limit; payloadOffset += 1) {
+        if (bytes[payloadOffset] === 0x47) {
+          let comparisons = 0;
+          let valid = true;
+          for (let packet = 1; packet <= 2; packet += 1) {
+            const syncOffset = payloadOffset + packet * 188;
+            if (syncOffset >= bytes.length) break;
+            comparisons += 1;
+            if (bytes[syncOffset] !== 0x47) valid = false;
+          }
+          if (valid && comparisons) return payloadOffset;
+        }
+        if (bytes[payloadOffset] !== 0x00 && bytes[payloadOffset] !== 0xff) return null;
+      }
+      return null;
+    }
     return null;
   };
 
@@ -123,6 +158,10 @@ export async function validateInPageContext(rawUrl: string, kind: StreamKind): P
       : { type: "media", variants: [], firstSegmentUrl, durationSeconds: duration || undefined, endList: lines.includes("#EXT-X-ENDLIST") };
   };
 
+  const looksLikeManifest = (url: string): boolean => {
+    try { return /\.m3u8$/i.test(new URL(url).pathname); } catch { return false; }
+  };
+
   try {
     if (kind === "file") {
       const bytes = await readBounded(rawUrl, MAX_PROBE_BYTES);
@@ -132,20 +171,38 @@ export async function validateInPageContext(rawUrl: string, kind: StreamKind): P
       return { status: "playable", reason: "site-context-media", container, bytesRead, accessMode: "site-context" };
     }
 
-    const manifestBytes = await readBounded(rawUrl, MAX_MANIFEST_BYTES);
-    const manifest = parseManifest(new TextDecoder().decode(manifestBytes), rawUrl);
-    const mediaUrl = manifest.type === "master" ? manifest.variants[0]?.url : rawUrl;
-    if (!mediaUrl) return { status: "rejected", reason: "empty-master", bytesRead };
-    const mediaBytes = manifest.type === "master" ? await readBounded(mediaUrl, MAX_MANIFEST_BYTES) : manifestBytes;
-    const media = parseManifest(new TextDecoder().decode(mediaBytes), mediaUrl);
+    let currentUrl = rawUrl;
+    let currentBytes = await readBounded(currentUrl, MAX_MANIFEST_BYTES);
+    let current = parseManifest(new TextDecoder().decode(currentBytes), currentUrl);
+    let variants: StreamVariant[] = [];
+    for (let depth = 0; depth < MAX_HLS_MANIFEST_DEPTH; depth += 1) {
+      if (current.type === "master") {
+        if (!current.variants[0]) return { status: "rejected", reason: "empty-master", bytesRead };
+        variants = current.variants;
+        currentUrl = current.variants[0].url;
+        currentBytes = await readBounded(currentUrl, MAX_MANIFEST_BYTES);
+        current = parseManifest(new TextDecoder().decode(currentBytes), currentUrl);
+        continue;
+      }
+      if (current.firstSegmentUrl && looksLikeManifest(current.firstSegmentUrl)) {
+        currentUrl = current.firstSegmentUrl;
+        currentBytes = await readBounded(currentUrl, MAX_MANIFEST_BYTES);
+        current = parseManifest(new TextDecoder().decode(currentBytes), currentUrl);
+        continue;
+      }
+      break;
+    }
+    const media = current;
     if (!media.firstSegmentUrl) return { status: "rejected", reason: "no-media-segment", bytesRead };
+    if (media.type === "master" || looksLikeManifest(media.firstSegmentUrl)) return { status: "rejected", reason: "manifest-depth-limit", bytesRead };
     if (media.endList && (media.durationSeconds || 0) < MIN_COMPLETE_HLS_SECONDS) return { status: "rejected", reason: "short-complete-hls", bytesRead };
     const segment = await readBounded(media.firstSegmentUrl, MAX_PROBE_BYTES);
     const sniffedContainer = sniffContainer(segment);
-    if (!sniffedContainer || sniffedContainer === "image") return { status: "rejected", reason: sniffedContainer === "image" ? "image-wrapped" : "unknown-media", bytesRead };
+    const adapterOffset = sniffedContainer === "image" ? adapterPayloadOffset(segment) : null;
+    if (!sniffedContainer || (sniffedContainer === "image" && adapterOffset === null)) return { status: "rejected", reason: sniffedContainer === "image" ? "image-wrapped" : "unknown-media", bytesRead };
     const durationSeconds = media.durationSeconds;
-    const variants = manifest.variants.map((variant) => ({ ...variant, estimatedBytes: durationSeconds && variant.bandwidth ? Math.round((durationSeconds * variant.bandwidth) / 8) : undefined }));
-    return { status: "playable", reason: "site-context-hls", container: sniffedContainer === "fmp4-fragment" ? "mp4" : sniffedContainer, variants, durationSeconds, bytesRead, accessMode: "site-context" };
+    const estimatedVariants = variants.map((variant) => ({ ...variant, estimatedBytes: durationSeconds && variant.bandwidth ? Math.round((durationSeconds * variant.bandwidth) / 8) : undefined }));
+    return { status: "playable", reason: adapterOffset === null ? "site-context-hls" : "site-context-adapter-hls", container: adapterOffset === null ? sniffedContainer === "fmp4-fragment" ? "mp4" : sniffedContainer : "mpeg-ts", variants: estimatedVariants, durationSeconds, bytesRead, accessMode: "site-context", adapter: adapterOffset === null ? undefined : "png-prefix-mpegts" };
   } catch (error) {
     return { status: "rejected", reason: error instanceof Error ? error.message.slice(0, 80) : "validation-error", bytesRead };
   }

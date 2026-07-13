@@ -1,10 +1,10 @@
 {
   "categories": ["download-management"],
   "summary": {
-    "en-US": "Find verified HLS and media URLs, then play, copy, or share them."
+    "en-US": "Find verified HLS and media URLs, then play, copy, share, or send them to another player."
   },
   "description": {
-    "en-US": "StreamBridge detects media requested by the page you are viewing, performs a bounded credential-free portability check, and offers browser playback, exact URL copying, and platform sharing. It has no analytics, advertising, account, or developer-operated server. It does not bypass DRM or replay private headers."
+    "en-US": "StreamBridge detects media requested by the page you are viewing and performs a bounded, credential-free portability check. Verified results are labeled Portable, Site-context, or Browser adapter. You can play a portable stream in the bundled player, copy its exact URL, share it, or send it to another player.\n\nStreamBridge is designed for Firefox desktop and Firefox for Android. The optional Android VLC Bridge is not required to use or review the extension. StreamBridge has no analytics, advertising, account, or developer-operated server. It does not bypass DRM, authenticated access controls, cookies, or authorization headers."
   },
   "homepage": {
     "en-US": "https://github.com/reckerswartz/StreamBridge"
@@ -12,5 +12,13 @@
   "support_url": {
     "en-US": "https://reckerswartz.github.io/StreamBridge/support.html"
   },
-  "license": "GPL-3.0-only"
+  "support_email": {
+    "en-US": "reckerswartz@hotmail.com"
+  },
+  "is_experimental": false,
+  "requires_payment": false,
+  "version": {
+    "license": "GPL-3.0-only",
+    "approval_notes": "No account is required. Reproduction and deterministic review steps are in store/reviewer-notes.md in the uploaded source archive. Run npm ci, npm run fixtures, and npm run fixtures:serve, then visit http://127.0.0.1:8765/fixture. The extension contains no remote executable code. The optional Android VLC Bridge is separate and is not required for review."
+  }
 }

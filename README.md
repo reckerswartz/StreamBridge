@@ -2,7 +2,7 @@
 
 StreamBridge is a GPL-licensed Chrome and Firefox extension that detects HLS and direct-media requests after playback starts. It performs bounded, credential-free checks and labels results as portable or site-context before placing a small control at the bottom of the page.
 
-Streams can be played in the browser, copied exactly, or passed to the platform Web Share menu. For site-context streams, StreamBridge generates a temporary M3U containing the source origin as a referrer. Desktop VLC can read that option directly. Official VLC for Android currently drops per-item M3U HTTP options, so the optional GPL StreamBridge VLC Bridge receives the M3U through a user-triggered app link, preserves its headers through a device-local loopback connection, and then opens VLC. No per-site VLC setting is required.
+Streams can be played in the browser, copied exactly, shared, or sent to another player. **Send to player** downloads a portable M3U on desktop and opens Android's share sheet for portable streams. A bounded browser adapter also recognizes structurally valid MPEG-TS segments placed after a tiny PNG envelope; these sources are played only in StreamBridge because copying the manifest alone is not enough. For site-context streams, StreamBridge generates a temporary M3U containing the source origin as a referrer. Desktop VLC can read that option directly. Official VLC for Android currently drops per-item M3U HTTP options, so the optional GPL StreamBridge VLC Bridge receives the M3U through a user-triggered app link, preserves its headers through a device-local loopback connection, and then opens VLC. No per-site VLC setting is required.
 
 See [VLC handoff](docs/vlc.md) for supported behavior and limitations.
 
@@ -37,6 +37,7 @@ npm run lint:webext    # Mozilla extension validation
 npm run package        # Chrome and Firefox ZIP packages
 npm run release:check  # version, changelog, privacy, icon, and manifest contract
 npm run release:reproducible # build twice and compare archive hashes
+npm run release:reviewer-source # rebuild store ZIPs from the source archive without Git
 ```
 
 Load `dist/chrome` from `chrome://extensions` with Developer mode enabled. For Firefox, run:
@@ -45,15 +46,29 @@ Load `dist/chrome` from `chrome://extensions` with Developer mode enabled. For F
 npx web-ext run --source-dir dist/firefox
 ```
 
+## Mozilla reviewer build
+
+The reviewer source ZIP builds on Mozilla's default Ubuntu 24.04 ARM64 environment with Node.js 24.14, npm 11.9, and the `zip` command installed. It contains the lockfile and a generated `.streambridge-build.json` file that preserves the Git commit, source epoch, and exact source-file list without requiring a Git checkout.
+
+```bash
+npm ci
+npm run release:check
+npm run package
+```
+
+The rebuilt `artifacts/streambridge-v0.1.1-firefox-store.zip` is byte-for-byte identical to the submitted package. Maintainers verify this from an extracted, Git-free source archive with `npm run release:reviewer-source`.
+
 ## Live-site diagnostics
 
 Real or unstable URLs belong in the ignored `test/sites.local.json`, using the structure in `test/sites.example.json`. They never run in CI.
 
 ```bash
 STREAMBRIDGE_LIVE_SITES=1 HEADED=1 npm run test:sites
+STREAMBRIDGE_LIVE_SITES=1 HEADED=1 npm run test:providers
+STREAMBRIDGE_LIVE_SITES=1 HEADED=1 npm run test:live-playback
 ```
 
-Reports omit query strings, cookies, and authorization data.
+The provider-matrix runner uses `serverLabels` and selectors from the local catalog to test each selectable player independently. The live-playback runner requires every configured host/path, access mode, and quality; it also verifies source playback, the overlay, stale-ad removal, and Resume site player. A catalog may define a diagnostic embed transition when the source site's own click script is broken; this is test-harness configuration and does not add a site rule to the extension. Use `STREAMBRIDGE_PROVIDER=TV` (or another configured label) to run one provider. Reports omit query strings, cookies, authorization data, and page titles.
 
 ## Stress and memory testing
 
@@ -67,27 +82,29 @@ Public non-DRM samples and the ignored live-site catalog are report-only:
 
 ```bash
 npm run stress:public
-npm run stress:live
+STREAMBRIDGE_LIVE_SITES=1 npm run stress:live
 npm run stress:android
 npm run android:bridge  # signed debug APK for physical-device testing
+STREAMBRIDGE_LIVE_SITES=1 npm run test:android-live
 ```
 
 Use `STRESS_TABS`, `STRESS_CYCLES`, `STRESS_CAPTURE_SECONDS`, and `STRESS_BURST_SECONDS` to adjust a local campaign. Reports are sanitized and written beneath `.tmp/stress/`.
 
-The Android runner uses bounded range requests to stress capture and cleanup without decoding 15 videos concurrently. Desktop Chromium owns the simultaneous-playback burst; Firefox Android suspends background media, and the project AVD has a known GPU decoder limitation.
+The Android stress runner starts muted fixture playback one tab at a time and sends a real page tap so passive autoplay does not satisfy the extension's activation gate. The opt-in live runner installs Firefox, the extension, the VLC Bridge, and checksum-verified VLC; it requires all configured qualities plus a VLC playing state and either an advancing position or increasing successful HLS responses. Desktop Chromium owns the simultaneous-playback burst; Firefox Android suspends background media, and the project AVD has a known GPU decoder limitation.
 
 ## Architecture and limits
 
 - Network classification is synchronous and bounded; validation runs with at most two concurrent jobs.
 - Media probes always omit credentials and stop after bounded byte limits. The first probe also omits referrers; a rejected URL already observed on the active page may receive one bounded page-context retry and is clearly labeled site-context.
-- VLC handoff creates a small local playlist only after a user action. It contains the selected URL, source origin, and browser user agent, but never cookies or authorization headers.
+- Send to player creates a small local playlist only after a user action. Portable playlists omit page context; site-context playlists contain the selected URL, source origin, and browser user agent. Neither contains cookies or authorization headers.
 - The optional Android VLC Bridge binds only to `127.0.0.1`, uses a random 192-bit session token, buffers manifests up to 2 MiB, streams media in 64 KiB chunks, and keeps at most six proxy workers. It has no remote service or analytics.
-- No permanent page content script or mutation observer is installed. The Shadow DOM UI is injected only after verification.
+- A small event-driven document-start observer watches only Resource Timing and trusted pointer/media events. It retains at most 32 manifest URLs, requests at most eight page scans, reports at most 32 media-state changes, uses no DOM polling or mutation observer, and disconnects on page exit. The heavier Shadow DOM UI is injected only after verification.
 - Private-browsing requests are ignored and the manifest disables private operation.
-- Version 0.1 considers requests from the top document only, preventing unrelated advertising iframes from being presented as the page's stream.
+- Normal top and embedded requests require a user activation and advancing, visible landscape video in their own frame. For a page-configured HLS source, a real activation, visible landscape player, and successful bounded manifest/segment validation are sufficient even when that site's Firefox player cannot decode the source. Autoplay advertisements and portrait ad videos remain excluded.
+- The generic page-config fallback inspects only data properties under media/config-like global names, never invokes getters, visits at most 2,000 objects to depth four, and returns at most 16 unique HLS host/path candidates. It contains no site hostnames or provider rules.
 - Completed HLS clips under ten seconds are ignored as promotional fragments; live playlists are not subject to this threshold.
 - Each tab stores at most 32 candidates and is cleared on navigation or closure.
-- The player loads `hls.js` only inside its own extension page. DASH is intentionally out of scope for version 0.1.
+- The player loads `hls.js` only inside its own extension page. Adapter fragments are fetched without credentials or referrers, capped at 16 MiB, and unwrapped only after strict PNG and repeated 188-byte MPEG-TS boundary checks. DASH is intentionally out of scope for version 0.1.
 
 ## License
 

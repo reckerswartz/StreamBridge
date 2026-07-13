@@ -6,5 +6,40 @@
     "waitAfterPlayMs": 3000,
     "expectedKind": "file",
     "expectedHostPattern": "127.0.0.1"
+  },
+  {
+    "name": "Configured multi-provider page",
+    "url": "https://example.test/video/123",
+    "serverSelector": "a.server",
+    "serverLabels": ["PRIMARY", "BACKUP"],
+    "providerFrameSelector": "iframe#player",
+    "waitAfterPlayMs": 5000,
+    "stressDiscovery": {
+      "listingUrl": "https://example.test/videos",
+      "linkSelector": "a.video[href]",
+      "includePathPattern": "^/video/[a-z0-9-]+$",
+      "includePathFlags": "i",
+      "sameOrigin": true
+    }
+  },
+  {
+    "name": "Configured live playback proof",
+    "url": "https://media.example.test/watch/123",
+    "livePlayback": true,
+    "preActions": [
+      { "selector": ".consent-accept", "optional": true, "waitAfterMs": 500 }
+    ],
+    "playSelector": ".player-play",
+    "waitAfterPlayMs": 15000,
+    "expected": {
+      "kind": "hls",
+      "accessMode": "site-context",
+      "candidateHostSuffix": ".cdn.example.test",
+      "candidatePathIncludes": "/hls/",
+      "minCandidates": 2,
+      "qualities": ["720p", "480p"],
+      "forbiddenHostPatterns": ["ads"],
+      "resumeQuality": "720p"
+    }
   }
 ]
