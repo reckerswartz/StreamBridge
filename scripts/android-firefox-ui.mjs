@@ -25,6 +25,10 @@ function nodeBounds(xml, attribute, value) {
 export async function enableFirefoxRemoteDebugging(options) {
   const { adb, device, firefoxPackage, diagnosticsDirectory } = options;
   const adbCommand = (args, commandOptions = {}) => exec(adb, ["-s", device, ...args], { maxBuffer: 20 * 1024 * 1024, ...commandOptions });
+  const sizeOutput = (await adbCommand(["shell", "wm", "size"])).stdout;
+  const sizes = [...sizeOutput.matchAll(/(?:Physical|Override) size:\s*(\d+)x(\d+)/gi)];
+  const screenWidth = Number(sizes.at(-1)?.[1] || 1080);
+  const screenHeight = Number(sizes.at(-1)?.[2] || 1920);
   const dump = async () => {
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -106,7 +110,8 @@ export async function enableFirefoxRemoteDebugging(options) {
 
   let remoteDebugging = locate(xml, "Remote debugging via USB");
   for (let attempt = 0; !remoteDebugging && attempt < 12; attempt += 1) {
-    await adbCommand(["shell", "input", "swipe", "540", "2050", "540", "650", "350"]);
+    const x = String(Math.round(screenWidth * 0.5));
+    await adbCommand(["shell", "input", "swipe", x, String(Math.round(screenHeight * 0.85)), x, String(Math.round(screenHeight * 0.25)), "350"]);
     await sleep(500);
     xml = await dump();
     remoteDebugging = locate(xml, "Remote debugging via USB");
