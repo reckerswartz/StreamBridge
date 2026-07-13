@@ -71,7 +71,10 @@ test("validates HLS, renders quality metadata, and plays through hls.js", async 
     const host = page.locator("#streambridge-host");
     await expect(host).toHaveCount(1, { timeout: 12_000 });
     await host.evaluate((element) => (element.shadowRoot!.querySelector("#toggle") as HTMLButtonElement).click());
-    await expect.poll(() => host.evaluate((element) => element.shadowRoot!.textContent)).toContain("640×360");
+    await expect.poll(
+      () => host.evaluate((element) => element.shadowRoot!.querySelector(".variant .title")?.textContent || ""),
+      { timeout: 15_000 }
+    ).toContain("640×360");
     const playerPromise = context.waitForEvent("page", { predicate: (candidate) => candidate.url().includes("/player/index.html") });
     await host.evaluate((element) => (element.shadowRoot!.querySelector("button.primary") as HTMLButtonElement).click());
     const player = await playerPromise;
