@@ -35,6 +35,7 @@ All notable StreamBridge changes are documented here. Releases follow semantic v
 - Quality rows now show both the familiar label and exact dimensions, such as `1080p · 1920×1080`.
 - Removed the redundant `tabs` permission, enlarged mobile touch targets, clarified the empty state, and added keyboard and expanded-state semantics to the overlay.
 - Firefox Android CI now enables and verifies Remote debugging via USB from a clean profile before temporary installation.
+- Firefox Android CI now handles both the legacy Firefox 142/147 multi-step theme and toolbar onboarding and the current Firefox onboarding flow.
 
 ## [0.1.0] - 2026-07-13
 

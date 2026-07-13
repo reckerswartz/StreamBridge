@@ -43,6 +43,7 @@ export async function enableFirefoxRemoteDebugging(options) {
     await sleep(700);
   };
   const locate = (xml, value) => nodeBounds(xml, "text", value) || nodeBounds(xml, "content-desc", value);
+  const locateAny = (xml, values) => values.map((value) => locate(xml, value)).find(Boolean);
   const enabledIn = (value) => /resource-id="[^"]*(?:switchWidget|switch_widget)"[^>]*checked="true"/i.test(value);
   const verifyEnabled = async (value) => {
     if (!enabledIn(value)) throw new Error("Firefox Remote debugging via USB did not stay enabled.");
@@ -70,8 +71,8 @@ export async function enableFirefoxRemoteDebugging(options) {
     return;
   }
   for (let attempt = 0; attempt < 24; attempt += 1) {
-    if (locate(xml, "More options")) break;
-    const next = ["Not now", "Cancel", "Continue", "Skip", "Start browsing", "Finish", "Done", "OK", "Got it"]
+    if (locateAny(xml, ["More options", "Menu"])) break;
+    const next = ["Not now", "Cancel", "Continue", "Save and continue", "Skip", "Start browsing", "Finish", "Done", "OK", "Got it"]
       .map((label) => locate(xml, label))
       .find(Boolean);
     if (!next) {
@@ -82,7 +83,7 @@ export async function enableFirefoxRemoteDebugging(options) {
     xml = await dump();
   }
 
-  const menu = locate(xml || await dump(), "More options");
+  const menu = locateAny(xml || await dump(), ["More options", "Menu"]);
   if (!menu) throw new Error("Firefox onboarding did not reach the browser toolbar.");
   await tap(menu);
   xml = await dump();
